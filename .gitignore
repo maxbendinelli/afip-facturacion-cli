@@ -1,0 +1,42 @@
+# Configuración local (contiene datos sensibles)
+.env
+
+# Certificados y claves privadas — NUNCA subir a repositorios públicos
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+certs/*.csr
+certs/
+
+# Caché generado automáticamente
+.afip_token_cache*.json
+.afip_wsdl_cache.db
+*.afip_token_cache*.json
+
+# Entorno virtual Python
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# PDFs generados
+factura_*.pdf
+comprobante_*.pdf
+
+# Editores e IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
