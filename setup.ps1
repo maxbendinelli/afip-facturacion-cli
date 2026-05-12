@@ -1,234 +1,249 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# Setup interactivo para AFIP Facturación Electrónica (PowerShell)
-# Crea el entorno virtual, instala dependencias y configura el archivo .env
-# ─────────────────────────────────────────────────────────────────────────────
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+    Setup interactivo para AFIP Facturación Electrónica (Windows)
+.DESCRIPTION
+    Crea el entorno virtual Python, instala dependencias y configura el archivo .env
+.NOTES
+    Si PowerShell bloquea la ejecución del script, ejecutar primero:
+        Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+    Luego:
+        .\setup.ps1
+#>
 
-$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
-function Print-Header {
-    Write-Host "" -ForegroundColor Cyan
-    Write-Host "══════════════════════════════════════════════════════" -ForegroundColor Cyan -Object "  AFIP Facturación Electrónica — Setup Inicial"
-    Write-Host "══════════════════════════════════════════════════════" -ForegroundColor Cyan
-    Write-Host ""
+# ── Helpers ───────────────────────────────────────────────────────────────────
+function Write-Step { param($msg) Write-Host "`n▶ $msg" -ForegroundColor Yellow }
+function Write-Ok   { param($msg) Write-Host "  ✓ $msg" -ForegroundColor Green }
+function Write-Warn { param($msg) Write-Host "  ⚠ $msg" -ForegroundColor Yellow }
+function Write-Err  { param($msg) Write-Host "  ✗ $msg" -ForegroundColor Red }
+function Write-Info { param($msg) Write-Host "  $msg" }
+
+function Read-Value {
+    param([string]$Prompt, [string]$Default = '')
+    $display = if ($Default) { "$Prompt [$Default]" } else { $Prompt }
+    $val = Read-Host "  $display"
+    if ([string]::IsNullOrWhiteSpace($val) -and $Default) { $Default } else { $val.Trim() }
 }
 
-function Step([string]$msg) { Write-Host "`n▶ $msg" -ForegroundColor Yellow -Style Bold }
-function Ok([string]$msg)   { Write-Host "  ✓ $msg" -ForegroundColor Green }
-function Warn([string]$msg) { Write-Host "  ⚠ $msg" -ForegroundColor Yellow }
-function Error-Msg([string]$msg) { Write-Host "  ✗ $msg" -ForegroundColor Red }
-function Info([string]$msg)  { Write-Host "  $msg" }
-
-function Ask([string]$prompt, [string]$default) {
-    if ($default) {
-        $val = Read-Host "  $prompt [$default]"
-    } else {
-        $val = Read-Host "  $prompt"
-    }
-    if ([string]::IsNullOrWhiteSpace($val) -and $default) { return $default }
-    return $val
-}
-
-function Ask-Required([string]$prompt) {
-    $val = ""
+function Read-Required {
+    param([string]$Prompt)
+    $val = ''
     while ([string]::IsNullOrWhiteSpace($val)) {
-        $val = Read-Host "  $prompt"
-        if ([string]::IsNullOrWhiteSpace($val)) { Warn "Este campo es obligatorio." }
+        $val = (Read-Host "  $Prompt").Trim()
+        if ([string]::IsNullOrWhiteSpace($val)) { Write-Warn 'Este campo es obligatorio.' }
     }
-    return $val
+    $val
 }
 
-function Confirm-Action([string]$prompt, [string]$default = "s") {
-    $opts = "S/n"
-    if ($default -eq "n") { $opts = "s/N" }
-    $res = Read-Host "  $prompt [$opts]"
-    if ([string]::IsNullOrWhiteSpace($res)) { $res = $default }
-    return ($res -match "^[sSyY]$")
+function Confirm-Yn {
+    param([string]$Prompt, [string]$Default = 's')
+    $opts = if ($Default -eq 's') { 'S/n' } else { 's/N' }
+    $r = (Read-Host "  $Prompt [$opts]").Trim()
+    if ([string]::IsNullOrWhiteSpace($r)) { $r = $Default }
+    $r -match '^[sSyY]$'
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-Print-Header
+# ── Encabezado ────────────────────────────────────────────────────────────────
+Write-Host ''
+Write-Host '══════════════════════════════════════════════════════' -ForegroundColor Blue
+Write-Host '  AFIP Facturación Electrónica — Setup Inicial' -ForegroundColor Blue
+Write-Host '══════════════════════════════════════════════════════' -ForegroundColor Blue
+Write-Host ''
 
 # ── 1. Python ─────────────────────────────────────────────────────────────────
-Step "Verificando Python..."
+Write-Step 'Verificando Python...'
 
-$PYTHON = "python"
-try {
-    $verString = python --version 2>&1
-    if ($LASTEXITCODE -ne 0) { throw }
-} catch {
+$PYTHON = $null
+foreach ($cmd in @('python', 'py')) {
     try {
-        $verString = python3 --version 2>&1
-        $PYTHON = "python3"
-    } catch {
-        Error-Msg "Python no encontrado."
-        Info "Asegúrese de tener Python 3.10+ instalado y en su PATH."
-        exit 1
-    }
+        $verOutput = & $cmd --version 2>&1
+        if ($verOutput -match 'Python (\d+)\.(\d+)') {
+            $major = [int]$Matches[1]; $minor = [int]$Matches[2]
+            if ($major -gt 3 -or ($major -eq 3 -and $minor -ge 10)) {
+                $PYTHON = $cmd
+                Write-Ok "Python $major.$minor (comando: $cmd)"
+                break
+            }
+            Write-Warn "Python $major.$minor es demasiado antiguo (mínimo 3.10)."
+        }
+    } catch { continue }
 }
 
-$pyVer = & $PYTHON -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
-$major = [int]$pyVer.Split('.')[0]
-$minor = [int]$pyVer.Split('.')[1]
-
-if ($major -lt 3 -or ($major -eq 3 -and $minor -lt 10)) {
-    Error-Msg "Se requiere Python 3.10 o superior (encontrado: $pyVer)."
+if (-not $PYTHON) {
+    Write-Err 'Python 3.10 o superior no encontrado.'
+    Write-Info 'Descargarlo de: https://www.python.org/downloads/'
+    Write-Info "Durante la instalación marcar: 'Add Python to PATH'"
     exit 1
 }
-Ok "Python $pyVer"
 
 # ── 2. Entorno virtual ────────────────────────────────────────────────────────
-Step "Configurando entorno virtual..."
+Write-Step 'Configurando entorno virtual...'
 
-if (-not (Test-Path ".venv")) {
+if (-not (Test-Path '.venv')) {
     & $PYTHON -m venv .venv
-    Ok "Entorno virtual creado en .venv/"
+    Write-Ok 'Entorno virtual creado en .venv\'
 } else {
-    Ok "Entorno virtual existente (.venv/)"
+    Write-Ok 'Entorno virtual existente (.venv\)'
 }
 
-# En PowerShell, activamos el script directamente
-$ACTIVATE_SCRIPT = ".\.venv\Scripts\Activate.ps1"
-if (Test-Path $ACTIVATE_SCRIPT) {
-    . $ACTIVATE_SCRIPT
-    Ok "Entorno virtual activado"
-} else {
-    # Caso para entornos no-Windows si alguien corre esto en Linux con pwsh
-    $ACTIVATE_SCRIPT_NIX = "./.venv/bin/Activate.ps1"
-    if (Test-Path $ACTIVATE_SCRIPT_NIX) {
-        . $ACTIVATE_SCRIPT_NIX
-        Ok "Entorno virtual activado"
-    } else {
-        Warn "No se pudo encontrar el script de activación. Continuando sin activar..."
-    }
+$activateScript = Join-Path $PWD '.venv\Scripts\Activate.ps1'
+if (-not (Test-Path $activateScript)) {
+    Write-Err "No se encontro el script de activacion: $activateScript"
+    exit 1
 }
+& $activateScript
+Write-Ok 'Entorno virtual activado'
 
 # ── 3. Dependencias ───────────────────────────────────────────────────────────
-Step "Instalando dependencias..."
-
-python -m pip install --upgrade pip --quiet
-python -m pip install -r requirements.txt --quiet
-Ok "Dependencias instaladas"
+Write-Step 'Instalando dependencias...'
+pip install --upgrade pip --quiet
+pip install -r requirements.txt --quiet
+Write-Ok 'Dependencias instaladas'
 
 # ── 4. Configuración .env ─────────────────────────────────────────────────────
-Step "Configuración de variables de entorno..."
+Write-Step 'Configuracion de variables de entorno...'
 
-if (Test-Path ".env") {
-    Warn "Ya existe un archivo .env."
-    if (-not (Confirm-Action "¿Sobreescribir con una nueva configuración?" "n")) {
-        Ok "Se mantiene el .env existente."
-        Write-Host "`nSetup completo." -ForegroundColor Green
-        Info "Active el entorno con: . .\.venv\Scripts\Activate.ps1"
-        Info "Use: python facturar.py --help"
+if (Test-Path '.env') {
+    Write-Warn 'Ya existe un archivo .env.'
+    if (-not (Confirm-Yn 'Sobreescribir con una nueva configuracion?' 'n')) {
+        Write-Ok 'Se mantiene el .env existente.'
+        Write-Host ''
+        Write-Host 'Setup completo.' -ForegroundColor Green
+        Write-Host '  Active el entorno con: .venv\Scripts\activate'
+        Write-Host '  Ayuda: python facturar.py --help'
         exit 0
     }
 }
 
-Write-Host "`n  ── Datos del emisor (aparecen en el PDF) ──────────────────" -ForegroundColor Cyan
+Write-Host ''
+Write-Host '  -- Datos del emisor (aparecen en el PDF) --' -ForegroundColor Cyan
 
-$CUIT = Ask-Required "CUIT del emisor (11 dígitos, sin guiones)"
-$CUIT = $CUIT -replace "[-. ]", ""
-if ($CUIT -notmatch "^[0-9]{11}$") {
-    Error-Msg "CUIT inválido: debe tener exactamente 11 dígitos."
+$CUIT = Read-Required 'CUIT del emisor (11 digitos, sin guiones)'
+$CUIT = $CUIT -replace '[-.\s]', ''
+if ($CUIT -notmatch '^\d{11}$') {
+    Write-Err "CUIT invalido '$CUIT': debe tener exactamente 11 digitos."
     exit 1
 }
 
-$RAZON_SOCIAL = Ask "Razón social (nombre legal)" ""
-$NOMBRE_FANTASIA = Ask "Nombre de fantasía — encabezado del PDF (dejar vacío si no aplica)" ""
-$DOMICILIO = Ask "Domicilio comercial" ""
-$DOMICILIO_FISCAL = Ask "Domicilio fiscal si difiere del comercial (vacío para usar el mismo)" ""
-$INICIO_ACT = Ask "Inicio de actividades (DD/MM/AAAA)" ""
-$ING_BRUTOS = Ask "Ingresos Brutos (número o EXENTO)" ""
-$LOGO_PATH = Ask "Ruta al logo PNG (vacío si no aplica)" ""
-$PUNTO_VENTA = Ask "Número de punto de venta" "1"
-$LIMITE_CF = Ask "Límite para Consumidor Final (pesos)" "97673.32"
+$RAZON_SOCIAL    = Read-Value 'Razon social (nombre legal)'
+$NOMBRE_FANTASIA = Read-Value 'Nombre de fantasia — encabezado PDF (vacio si no aplica)'
+$DOMICILIO       = Read-Value 'Domicilio comercial'
+$DOM_FISCAL      = Read-Value 'Domicilio fiscal si difiere del comercial (vacio = mismo)'
+$INICIO_ACT      = Read-Value 'Inicio de actividades (DD/MM/AAAA)'
+$ING_BRUTOS      = Read-Value 'Ingresos Brutos (numero o EXENTO)'
+$LOGO_PATH       = Read-Value 'Ruta al logo PNG (vacio si no aplica)'
+$PUNTO_VENTA     = Read-Value 'Numero de punto de venta' '1'
+$LIMITE_CF       = Read-Value 'Limite para Consumidor Final (pesos)' '97673.32'
 
-Write-Host "`n  ── Entorno AFIP ────────────────────────────────────────────" -ForegroundColor Cyan
+Write-Host ''
+Write-Host '  -- Entorno AFIP --' -ForegroundColor Cyan
+Write-Host ''
 
-$ENV_AFIP = "homo"
-if (Confirm-Action "¿Usar entorno de PRODUCCIÓN? (responda NO para homologación/pruebas)" "n") {
-    $ENV_AFIP = "prod"
-    Warn "Entorno: PRODUCCIÓN — las facturas emitidas serán válidas ante AFIP."
+$ENV_AFIP = 'homo'
+if (Confirm-Yn 'Usar entorno de PRODUCCION? (NO = homologacion/pruebas)' 'n') {
+    $ENV_AFIP = 'prod'
+    Write-Warn 'Entorno: PRODUCCION — las facturas seran validas ante AFIP.'
 } else {
-    Ok "Entorno: homologación (pruebas, sin efecto real)."
+    Write-Ok 'Entorno: homologacion (pruebas, sin efecto real).'
 }
 
-Write-Host "`n  ── Certificados WSAA ───────────────────────────────────────" -ForegroundColor Cyan
-Info "Los certificados se obtienen en el portal AFIP: https://auth.afip.gob.ar/"
-Info "Servicios → WSASS → Agregar 'wsfe' → subir CSR → descargar .crt"
+Write-Host ''
+Write-Host '  -- Certificados WSAA --' -ForegroundColor Cyan
+Write-Host ''
+Write-Info 'Los certificados se obtienen en: https://auth.afip.gob.ar/'
+Write-Info 'Servicios -> WSASS -> Agregar "wsfe" -> subir CSR -> descargar .crt'
 
-$CERT_PATH = ""
-$KEY_PATH = ""
-
-if (Confirm-Action "¿Ya tiene el certificado (.crt) y la clave privada (.key)?") {
-    $CERT_PATH = Ask "Ruta al certificado (.crt / .pem)" "./certs/afip_$($CUIT).crt"
-    $KEY_PATH = Ask  "Ruta a la clave privada (.key / .pem)" "./certs/afip_$($CUIT).key"
-} else {
-    if (Confirm-Action "¿Generar nueva clave RSA y CSR ahora?") {
-        if ([string]::IsNullOrWhiteSpace($RAZON_SOCIAL)) { $RAZON_SOCIAL = Ask-Required "Razón social (requerida para el CSR)" }
-        Write-Host ""
-        python generar_csr.py --cuit "$CUIT" --razon-social "$RAZON_SOCIAL"
-        $CERT_PATH = "./certs/afip_$($CUIT).crt"
-        $KEY_PATH = "./certs/afip_$($CUIT).key"
-        Write-Host ""
-        Warn "Se generó la clave privada y el CSR."
-        Warn "Suba  ./certs/afip_$($CUIT).csr  al portal AFIP."
-        Warn "Cuando descargue el certificado, guárdelo en: $CERT_PATH"
-        Warn "Luego puede editar el .env directamente o volver a ejecutar este script."
+function Setup-Cert {
+    param([string]$Label, [string]$DefaultDir)
+    Write-Host ''
+    Write-Host "  -- Certificado $Label --" -ForegroundColor Cyan
+    Write-Host ''
+    $cert = ''; $key = ''
+    if (Confirm-Yn "Tiene certificado para $Label?") {
+        $cert = Read-Value 'Ruta al certificado (.crt / .pem)' "$DefaultDir\afip_$CUIT.crt"
+        $key  = Read-Value 'Ruta a la clave privada (.key / .pem)' "$DefaultDir\afip_$CUIT.key"
     } else {
-        $CERT_PATH = "./certs/afip_$($CUIT).crt"
-        $KEY_PATH = "./certs/afip_$($CUIT).key"
-        Warn "Complete AFIP_CERT_PATH y AFIP_KEY_PATH en el archivo .env cuando tenga los certificados."
+        if (Confirm-Yn "Generar nueva clave RSA y CSR para $Label ahora?") {
+            if ([string]::IsNullOrWhiteSpace($RAZON_SOCIAL)) {
+                $script:RAZON_SOCIAL = Read-Required 'Razon social (requerida para el CSR)'
+            }
+            New-Item -ItemType Directory -Force -Path $DefaultDir | Out-Null
+            Write-Host ''
+            & $PYTHON generar_csr.py --cuit $CUIT --razon-social $RAZON_SOCIAL --out-dir $DefaultDir
+            $cert = "$DefaultDir\afip_$CUIT.crt"
+            $key  = "$DefaultDir\afip_$CUIT.key"
+            Write-Host ''
+            Write-Warn "Suba  $DefaultDir\afip_$CUIT.csr  al portal AFIP."
+            Write-Warn "Guarde el certificado descargado en: $cert"
+        } else {
+            $cert = "$DefaultDir\afip_$CUIT.crt"
+            $key  = "$DefaultDir\afip_$CUIT.key"
+            Write-Warn "Complete las rutas en el .env cuando tenga los certificados de $Label."
+        }
     }
+    return @{ Cert = $cert; Key = $key }
 }
+
+$homo = Setup-Cert 'HOMOLOGACION' '.\certs\homo'
+$prod = Setup-Cert 'PRODUCCION'   '.\certs'
+$CERT_PATH_HOMO = $homo.Cert; $KEY_PATH_HOMO = $homo.Key
+$CERT_PATH_PROD = $prod.Cert; $KEY_PATH_PROD = $prod.Key
 
 # ── Escribir .env ─────────────────────────────────────────────────────────────
-$envContent = @"
-# AFIP Facturación Electrónica — Configuración local
-# ADVERTENCIA: no subir este archivo a repositorios públicos.
+$envLines = @(
+    '# AFIP Facturacion Electronica - Configuracion local'
+    '# ADVERTENCIA: no subir este archivo a repositorios publicos.'
+    ''
+    '# -- Identificacion --'
+    "AFIP_CUIT=$CUIT"
+    ''
+    '# -- Datos del emisor (PDF) --'
+    "AFIP_RAZON_SOCIAL=$RAZON_SOCIAL"
+    "AFIP_NOMBRE_FANTASIA=$NOMBRE_FANTASIA"
+    "AFIP_DOMICILIO=$DOMICILIO"
+    "AFIP_DOMICILIO_FISCAL=$DOM_FISCAL"
+    "AFIP_INICIO_ACTIVIDADES=$INICIO_ACT"
+    "AFIP_INGRESOS_BRUTOS=$ING_BRUTOS"
+    "AFIP_LOGO_PATH=$LOGO_PATH"
+    ''
+    '# -- Punto de venta --'
+    "AFIP_PUNTO_VENTA=$PUNTO_VENTA"
+    ''
+    '# -- Limite Consumidor Final --'
+    "AFIP_LIMITE_CF=$LIMITE_CF"
+    ''
+    '# -- Certificados WSAA (separados por entorno) --'
+    "AFIP_CERT_PATH_HOMO=$CERT_PATH_HOMO"
+    "AFIP_KEY_PATH_HOMO=$KEY_PATH_HOMO"
+    "AFIP_CERT_PATH_PROD=$CERT_PATH_PROD"
+    "AFIP_KEY_PATH_PROD=$KEY_PATH_PROD"
+    ''
+    '# -- Cache (generado automaticamente) --'
+    '# El codigo agrega _{env}.json al prefijo: caches separados para homo y prod'
+    'AFIP_TOKEN_CACHE_PATH=.\.afip_token_cache'
+    'AFIP_WSDL_CACHE_PATH=.\.afip_wsdl_cache.db'
+)
 
-# ── Identificación ────────────────────────────────────────────────────────────
-AFIP_CUIT=$CUIT
-
-# ── Datos del emisor (PDF) ────────────────────────────────────────────────────
-AFIP_RAZON_SOCIAL=$RAZON_SOCIAL
-AFIP_NOMBRE_FANTASIA=$NOMBRE_FANTASIA
-AFIP_DOMICILIO=$DOMICILIO
-AFIP_DOMICILIO_FISCAL=$DOMICILIO_FISCAL
-AFIP_INICIO_ACTIVIDADES=$INICIO_ACT
-AFIP_INGRESOS_BRUTOS=$ING_BRUTOS
-AFIP_LOGO_PATH=$LOGO_PATH
-
-# ── Punto de venta ────────────────────────────────────────────────────────────
-AFIP_PUNTO_VENTA=$PUNTO_VENTA
-
-# ── Límite Consumidor Final ───────────────────────────────────────────────────
-AFIP_LIMITE_CF=$LIMITE_CF
-
-# ── Certificados WSAA ─────────────────────────────────────────────────────────
-AFIP_CERT_PATH=$CERT_PATH
-AFIP_KEY_PATH=$KEY_PATH
-
-# ── Caché (generado automáticamente) ─────────────────────────────────────────
-AFIP_TOKEN_CACHE_PATH=./.afip_token_cache_$($ENV_AFIP).json
-AFIP_WSDL_CACHE_PATH=./.afip_wsdl_cache.db
-"@
-
-Set-Content -Path ".env" -Value $envContent -Encoding utf8
-Write-Host "`n  ✓ .env creado" -ForegroundColor Green
+Set-Content -Path '.env' -Value $envLines -Encoding UTF8
+Write-Ok '.env creado'
 
 # ── Resumen ───────────────────────────────────────────────────────────────────
-Write-Host "`n══════════════════════════════════════════════════════" -ForegroundColor Green
-Write-Host "  Setup completo" -ForegroundColor Green
-Write-Host "══════════════════════════════════════════════════════" -ForegroundColor Green
-Write-Host ""
-Write-Host "  Active el entorno virtual en cada sesión:"
-Write-Host "    . .\.venv\Scripts\Activate.ps1" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "  Comandos principales:"
-Write-Host "    python facturar.py emitir --$ENV_AFIP --monto 1000 --concepto 'Prueba'" -ForegroundColor Cyan
-Write-Host "    python facturar.py --help" -ForegroundColor Cyan
-Write-Host ""
-if ($ENV_AFIP -eq "homo") {
-    Warn "Está en modo HOMOLOGACIÓN. Use --prod para emitir facturas reales."
+Write-Host ''
+Write-Host '══════════════════════════════════════════════════════' -ForegroundColor Green
+Write-Host '  Setup completo' -ForegroundColor Green
+Write-Host '══════════════════════════════════════════════════════' -ForegroundColor Green
+Write-Host ''
+Write-Host '  Active el entorno virtual en cada sesion:'
+Write-Host '    .venv\Scripts\activate' -ForegroundColor White
+Write-Host ''
+Write-Host '  Comandos principales:'
+Write-Host "    python facturar.py emitir --$ENV_AFIP --monto 1000 --concepto 'Prueba'" -ForegroundColor White
+Write-Host '    python facturar.py --help' -ForegroundColor White
+Write-Host ''
+if ($ENV_AFIP -eq 'homo') {
+    Write-Warn 'Esta en modo HOMOLOGACION. Use --prod para emitir facturas reales.'
 }
-Write-Host ""
+Write-Host ''

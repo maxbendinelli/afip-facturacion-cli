@@ -163,30 +163,42 @@ info "Los certificados se obtienen en el portal AFIP: https://auth.afip.gob.ar/"
 info "Servicios → WSASS → Agregar 'wsfe' → subir CSR → descargar .crt"
 echo ""
 
-CERT_PATH=""
-KEY_PATH=""
+_setup_cert_env() {
+    local label="$1"   # "HOMOLOGACIÓN" o "PRODUCCIÓN"
+    local env_tag="$2" # "homo" o "prod"
+    local default_dir="$3"
 
-if confirm "¿Ya tiene el certificado (.crt) y la clave privada (.key)?"; then
-    CERT_PATH=$(ask "Ruta al certificado (.crt / .pem)" "./certs/afip_${CUIT}.crt")
-    KEY_PATH=$(ask  "Ruta a la clave privada (.key / .pem)" "./certs/afip_${CUIT}.key")
-else
-    if confirm "¿Generar nueva clave RSA y CSR ahora?"; then
-        [ -z "$RAZON_SOCIAL" ] && RAZON_SOCIAL=$(ask_req "Razón social (requerida para el CSR)")
-        echo ""
-        $PYTHON generar_csr.py --cuit "$CUIT" --razon-social "$RAZON_SOCIAL"
-        CERT_PATH="./certs/afip_${CUIT}.crt"
-        KEY_PATH="./certs/afip_${CUIT}.key"
-        echo ""
-        warn "Se generó la clave privada y el CSR."
-        warn "Suba  ./certs/afip_${CUIT}.csr  al portal AFIP."
-        warn "Cuando descargue el certificado, guárdelo en: $CERT_PATH"
-        warn "Luego puede editar el .env directamente o volver a ejecutar este script."
+    echo ""
+    echo -e "${BOLD}  ── Certificado ${label} ────────────────────────${NC}"
+    echo ""
+
+    local cert_var="CERT_PATH_${env_tag^^}"
+    local key_var="KEY_PATH_${env_tag^^}"
+
+    if confirm "¿Tiene certificado para ${label}?"; then
+        printf -v "$cert_var" '%s' "$(ask "Ruta al certificado (.crt / .pem)" "${default_dir}/afip_${CUIT}.crt")"
+        printf -v "$key_var"  '%s' "$(ask "Ruta a la clave privada (.key / .pem)" "${default_dir}/afip_${CUIT}.key")"
     else
-        CERT_PATH="./certs/afip_${CUIT}.crt"
-        KEY_PATH="./certs/afip_${CUIT}.key"
-        warn "Complete AFIP_CERT_PATH y AFIP_KEY_PATH en el archivo .env cuando tenga los certificados."
+        if confirm "¿Generar nueva clave RSA y CSR para ${label} ahora?"; then
+            [ -z "$RAZON_SOCIAL" ] && RAZON_SOCIAL=$(ask_req "Razón social (requerida para el CSR)")
+            mkdir -p "${default_dir}"
+            echo ""
+            $PYTHON generar_csr.py --cuit "$CUIT" --razon-social "$RAZON_SOCIAL" --out-dir "${default_dir}"
+            printf -v "$cert_var" '%s' "${default_dir}/afip_${CUIT}.crt"
+            printf -v "$key_var"  '%s' "${default_dir}/afip_${CUIT}.key"
+            echo ""
+            warn "Suba  ${default_dir}/afip_${CUIT}.csr  al portal AFIP."
+            warn "Guarde el certificado descargado en: ${default_dir}/afip_${CUIT}.crt"
+        else
+            printf -v "$cert_var" '%s' "${default_dir}/afip_${CUIT}.crt"
+            printf -v "$key_var"  '%s' "${default_dir}/afip_${CUIT}.key"
+            warn "Complete las rutas en el .env cuando tenga los certificados de ${label}."
+        fi
     fi
-fi
+}
+
+_setup_cert_env "HOMOLOGACIÓN" "homo" "./certs/homo"
+_setup_cert_env "PRODUCCIÓN"   "prod" "./certs"
 
 # ── Escribir .env ─────────────────────────────────────────────────────────────
 cat > .env <<EOF
@@ -211,12 +223,15 @@ AFIP_PUNTO_VENTA=${PUNTO_VENTA}
 # ── Límite Consumidor Final ───────────────────────────────────────────────────
 AFIP_LIMITE_CF=${LIMITE_CF}
 
-# ── Certificados WSAA ─────────────────────────────────────────────────────────
-AFIP_CERT_PATH=${CERT_PATH}
-AFIP_KEY_PATH=${KEY_PATH}
+# ── Certificados WSAA (separados por entorno) ────────────────────────────────
+AFIP_CERT_PATH_HOMO=${CERT_PATH_HOMO}
+AFIP_KEY_PATH_HOMO=${KEY_PATH_HOMO}
+AFIP_CERT_PATH_PROD=${CERT_PATH_PROD}
+AFIP_KEY_PATH_PROD=${KEY_PATH_PROD}
 
 # ── Caché (generado automáticamente) ─────────────────────────────────────────
-AFIP_TOKEN_CACHE_PATH=./.afip_token_cache_${ENV}.json
+# El código agrega _{env}.json al prefijo → caches separados para homo y prod
+AFIP_TOKEN_CACHE_PATH=./.afip_token_cache
 AFIP_WSDL_CACHE_PATH=./.afip_wsdl_cache.db
 EOF
 

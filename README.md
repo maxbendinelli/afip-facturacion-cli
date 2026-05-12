@@ -47,18 +47,28 @@ Pillow        — procesamiento de imágenes
 
 ## Instalación rápida
 
+**Linux / macOS:**
 ```bash
 git clone https://github.com/TU_USUARIO/afip-facturacion.git
 cd afip-facturacion
 bash setup.sh
 ```
 
-El script interactivo:
-1. Verifica la versión de Python
-2. Crea y activa un entorno virtual `.venv/`
-3. Instala todas las dependencias
-4. Guía la configuración del archivo `.env`
-5. Opcionalmente genera la clave RSA y el CSR para AFIP
+**Windows (PowerShell):**
+```powershell
+git clone https://github.com/TU_USUARIO/afip-facturacion.git
+cd afip-facturacion
+# Si es la primera vez que ejecuta scripts PS1:
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+.\setup.ps1
+```
+
+Ambos scripts realizan los mismos pasos:
+1. Verifican la versión de Python (3.10+)
+2. Crean y activan un entorno virtual `.venv/`
+3. Instalan todas las dependencias
+4. Guían la configuración del archivo `.env`
+5. Opcionalmente generan la clave RSA y el CSR para AFIP
 
 ---
 

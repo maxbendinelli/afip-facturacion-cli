@@ -77,6 +77,7 @@ class InvoiceResponse:
     periodo_hasta: Optional[str] = None
     domicilio_cliente: Optional[str] = None
     hora: Optional[str] = None          # HHMMSS
+    fecha_vto_pago: Optional[str] = None  # YYYYMMDD
     items: list = field(default_factory=list)  # list[InvoiceItem]
     observaciones: list = field(default_factory=list)
 
@@ -108,6 +109,8 @@ class InvoiceResponse:
             d["periodo_desde"] = self.periodo_desde
         if self.periodo_hasta:
             d["periodo_hasta"] = self.periodo_hasta
+        if self.fecha_vto_pago:
+            d["fecha_vto_pago"] = self.fecha_vto_pago
         if self.items:
             d["items"] = [
                 {

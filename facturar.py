@@ -38,8 +38,8 @@ def _parse_item(raw: str) -> InvoiceItem:
         price = Decimal(price_s.strip()).quantize(Decimal("0.01"))
     except InvalidOperation:
         raise ValueError(f"Cantidad o precio inválido en ítem: '{raw}'")
-    if qty <= 0 or price <= 0:
-        raise ValueError(f"Cantidad y precio deben ser mayores a cero en ítem: '{raw}'")
+    if qty <= 0 or price == 0:
+        raise ValueError(f"Cantidad debe ser mayor a cero y precio distinto de cero en ítem: '{raw}'")
     return InvoiceItem(descripcion=desc.strip(), cantidad=qty, precio_unitario=price)
 
 
@@ -130,6 +130,9 @@ def cmd_emitir(args) -> None:
         periodo_desde = hoy.replace(day=1).strftime("%Y%m%d")
         periodo_hasta = _last_day_of_month(hoy).strftime("%Y%m%d")
 
+    fecha_vto_pago_afip = args.fecha_vto_pago or periodo_hasta
+    fecha_vto_pago_pdf = args.fecha_vto_pago or fecha
+
     concepto_afip = args.concepto_afip
     condicion_venta = args.condicion_venta
 
@@ -200,7 +203,7 @@ def cmd_emitir(args) -> None:
         fecha=fecha,
         fecha_serv_desde=periodo_desde,
         fecha_serv_hasta=periodo_hasta,
-        fecha_vto_pago=periodo_hasta,
+        fecha_vto_pago=fecha_vto_pago_afip,
         doc_tipo=doc_tipo,
         doc_nro=doc_nro,
         condicion_iva_receptor=args.condicion_iva,
@@ -218,6 +221,7 @@ def cmd_emitir(args) -> None:
         _output({"error": f"Error al solicitar CAE: {e}"}, 1)
 
     resp.hora = datetime.now().strftime("%H%M%S")
+    resp.fecha_vto_pago = fecha_vto_pago_pdf
     if datos_padron:
         resp.domicilio_cliente = datos_padron.get("domicilio")
 
@@ -534,10 +538,14 @@ def cmd_generar_pdf(args) -> None:
     except ConfigError as e:
         _output({"error": str(e)}, 1)
 
+    sin_cuit = args.cuit_cliente == "SIN_CUIT"
     try:
         doc_tipo, _ = _parse_doc(args.cuit_cliente)
     except ValueError:
         doc_tipo = 99
+
+    if sin_cuit and args.nombre_cliente != "Consumidor Final":
+        _output({"error": "Se requiere --cuit-cliente cuando el destinatario no es Consumidor Final."}, 1)
 
     items = []
     if args.item:
@@ -568,6 +576,7 @@ def cmd_generar_pdf(args) -> None:
         condicion_venta=args.condicion_venta,
         periodo_desde=args.periodo_desde,
         periodo_hasta=args.periodo_hasta,
+        fecha_vto_pago=args.fecha_vto_pago or args.fecha,
         items=items,
     )
 
@@ -602,6 +611,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_emit.add_argument("--fecha", metavar="YYYYMMDD", help="Default: hoy")
     p_emit.add_argument("--periodo-desde", metavar="YYYYMMDD")
     p_emit.add_argument("--periodo-hasta", metavar="YYYYMMDD")
+    p_emit.add_argument("--fecha-vto-pago", default=None, metavar="YYYYMMDD",
+                        help="Fecha vto. pago para PDF. Default: fecha de emisión")
     p_emit.add_argument("--env", choices=["homo", "prod"], default="homo")
     p_emit.add_argument("--dry-run", action="store_true")
     p_emit.add_argument("--pdf", action="store_true", help="Generar PDF")
@@ -672,10 +683,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_pdf.add_argument("--monto", type=float, default=None)
     p_pdf.add_argument("--item", action="append", metavar="DESC|CANT|PRECIO")
     p_pdf.add_argument("--nombre-cliente", default="Consumidor Final")
-    p_pdf.add_argument("--cuit-cliente", default="SIN_CUIT")
+    p_pdf.add_argument("--cuit-cliente", default="SIN_CUIT",
+                       help="DNI/CUIT del destinatario. Requerido salvo Consumidor Final sin datos.")
     p_pdf.add_argument("--condicion-venta", default="Contado")
     p_pdf.add_argument("--periodo-desde", metavar="YYYYMMDD")
     p_pdf.add_argument("--periodo-hasta", metavar="YYYYMMDD")
+    p_pdf.add_argument("--fecha-vto-pago", default=None, metavar="YYYYMMDD")
     p_pdf.add_argument("--duplicado", action="store_true")
     p_pdf.add_argument("--env", choices=["homo", "prod"], default="prod")
     p_pdf.add_argument("--output", metavar="ARCHIVO.pdf")
