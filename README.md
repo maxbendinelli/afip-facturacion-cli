@@ -1,351 +1,237 @@
-# AFIP Facturación Electrónica
+# afip-facturacion
 
-CLI en Python para emitir, consultar y reimprimir **comprobantes electrónicos** (Factura C, Nota de Débito/Crédito) ante AFIP / ARCA, con generación de PDF normativo (RG 1415/2003) y código QR de verificación.
+CLI en Python para facturación electrónica argentina a través de los servicios web de **ARCA/AFIP** (WSFEv1). Permite emitir Facturas C, Notas de Crédito y Débito, consultar comprobantes y generar PDFs con formato oficial.
 
-Orientado a **monotributistas** y pequeñas empresas que necesitan automatizar la facturación sin depender de sistemas de gestión externos.
-
----
+> Pensado para **monotributistas** que necesitan automatizar o integrar la emisión de comprobantes electrónicos.
 
 ## Características
 
-- Emisión de Factura C, Nota de Débito C y Nota de Crédito C vía WSFEv1
-- Soporte de múltiples ítems con cantidades y precios unitarios
-- Consulta del padrón A13 para autocompletar nombre y domicilio del receptor
-- PDF normativo: encabezado estándar, datos del comprador, detalle, totales, CAE, QR AFIP
-- Logo o nombre de fantasía configurables en el encabezado
-- Duplicado en segunda página del PDF
-- Búsqueda de comprobantes por número, fecha y receptor (consulta directa a AFIP)
-- Reimpresión desde JSON guardado o consultando AFIP en tiempo real
-- Validación de CUIT/CUIL con dígito verificador y verificación contra padrón
-- Caché de tokens WSAA para evitar autenticaciones repetidas
-- Soporte de entornos homologación y producción
-- Setup interactivo mediante `setup.sh`
-
----
+- ✅ Emite **Factura C** para cualquier tipo de receptor (Consumidor Final, RI, Monotributista, Exento, etc.)
+- ✅ **Nota de Crédito C** y **Nota de Débito C**
+- ✅ Resolución automática del nombre del receptor vía **Padrón A13** de AFIP
+- ✅ Inferencia automática de la **condición IVA** del receptor según el documento
+- ✅ Generación de **PDF** con formato oficial ARCA (QR, CAE, tabla de ítems)
+- ✅ Consulta y búsqueda de comprobantes emitidos
+- ✅ Soporte para **homologación y producción**
+- ✅ Output en **JSON** — fácil de integrar con otros scripts o sistemas
+- ✅ Helper para generar **clave RSA + CSR** para registrar en AFIP
 
 ## Requisitos
 
-- **Python 3.10** o superior
-- Conexión a internet (para comunicarse con los servicios web de AFIP)
-- **Certificado digital** y **clave privada** emitidos por AFIP para el servicio `wsfe`  
-  (ver sección [Obtener certificados AFIP](#obtener-certificados-afip))
-
-Dependencias Python (se instalan automáticamente con el setup):
-
-```
-zeep          — cliente SOAP
-cryptography  — firma CMS/PKCS#7 para WSAA
-python-dotenv — lectura del archivo .env
-requests      — HTTP
-lxml          — procesamiento XML
-reportlab     — generación de PDF
-qrcode[pil]   — código QR en el PDF
-Pillow        — procesamiento de imágenes
-```
-
----
-
-## Instalación rápida
-
-**Linux / macOS:**
-```bash
-git clone https://github.com/TU_USUARIO/afip-facturacion.git
-cd afip-facturacion
-bash setup.sh
-```
-
-**Windows (PowerShell):**
-```powershell
-git clone https://github.com/TU_USUARIO/afip-facturacion.git
-cd afip-facturacion
-# Si es la primera vez que ejecuta scripts PS1:
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-.\setup.ps1
-```
-
-Ambos scripts realizan los mismos pasos:
-1. Verifican la versión de Python (3.10+)
-2. Crean y activan un entorno virtual `.venv/`
-3. Instalan todas las dependencias
-4. Guían la configuración del archivo `.env`
-5. Opcionalmente generan la clave RSA y el CSR para AFIP
-
----
-
-## Instalación manual
+- Python 3.11+
+- Certificado digital emitido por AFIP/ARCA (ver [Configuración inicial](#configuración-inicial))
 
 ```bash
-# Clonar
-git clone https://github.com/TU_USUARIO/afip-facturacion.git
+pip install -r requirements.txt
+```
+
+## Instalación
+
+```bash
+git clone https://github.com/tu-usuario/afip-facturacion.git
 cd afip-facturacion
 
-# Entorno virtual
 python3 -m venv .venv
 source .venv/bin/activate
-
-# Dependencias
 pip install -r requirements.txt
 
-# Configuración
 cp .env.example .env
-# Editar .env con sus datos (ver sección Configuración)
+# Editar .env con tu CUIT, paths de certificado y punto de venta
 ```
 
----
-
-## Obtener certificados AFIP
-
-> Este paso es necesario para comunicarse con los servicios web de AFIP.  
-> Si ya tiene un certificado `.crt` y una clave `.key`, puede saltarlo.
+## Configuración inicial
 
 ### 1. Generar clave privada y CSR
 
 ```bash
-source .venv/bin/activate
 python3 generar_csr.py --cuit 20123456789 --razon-social "Juan Pérez"
 ```
 
-Esto crea en `./certs/`:
-- `afip_20123456789.key` — clave privada RSA (guardar de forma segura)
-- `afip_20123456789.csr` — solicitud de certificado para subir a AFIP
+Esto genera `certs/afip_20123456789.key` (clave privada) y `certs/afip_20123456789.csr` (CSR para subir a AFIP).
 
-### 2. Registrar en el portal AFIP
+### 2. Obtener el certificado en AFIP
 
-1. Ingresar a [https://auth.afip.gob.ar/](https://auth.afip.gob.ar/) con clave fiscal nivel 3 o superior
+1. Ingresá a [auth.afip.gob.ar](https://auth.afip.gob.ar/) con clave fiscal nivel 3+
 2. Ir a **Servicios → WSASS (Autogestión Servicios Web)**
-3. Agregar el servicio **wsfe** (factura electrónica)
-4. Subir el contenido del archivo `.csr`
-5. Descargar el certificado `.crt` generado por AFIP
+3. Agregar el servicio `wsfe` para tu CUIT
+4. Subir el contenido del `.csr` generado
+5. Descargar el certificado `.crt` y guardarlo en `certs/`
 
-### 3. Configurar rutas en `.env`
+### 3. Configurar el `.env`
 
-```env
-AFIP_CERT_PATH=./certs/afip_20123456789.crt
-AFIP_KEY_PATH=./certs/afip_20123456789.key
+```bash
+cp .env.example .env
 ```
 
-> **Seguridad:** Los archivos `.key` y `.crt` están en `.gitignore`.  
-> **Nunca** los suba a repositorios públicos.
-
----
-
-## Configuración
-
-Edite el archivo `.env` con sus datos:
+Completar al menos:
 
 ```env
-# Identificación
 AFIP_CUIT=20123456789
-
-# Datos que aparecen en el PDF
-AFIP_RAZON_SOCIAL=Juan Pérez
-AFIP_NOMBRE_FANTASIA=         # Opcional: aparece prominente; la razón social se muestra como "de Juan Pérez"
-AFIP_DOMICILIO=Av. Corrientes 1234, CABA
-AFIP_DOMICILIO_FISCAL=        # Si difiere del comercial
-AFIP_INICIO_ACTIVIDADES=01/01/2020
-AFIP_INGRESOS_BRUTOS=EXENTO   # o el número de inscripción
-AFIP_LOGO_PATH=               # Ruta a PNG del logo (opcional)
-
-# Punto de venta (registrado en AFIP)
-AFIP_PUNTO_VENTA=1
-
-# Límite para emitir sin identificar al receptor (actualizar según RG vigente)
-AFIP_LIMITE_CF=97673.32
-
-# Certificados
 AFIP_CERT_PATH=./certs/afip_20123456789.crt
 AFIP_KEY_PATH=./certs/afip_20123456789.key
-
-# Caché (se genera automáticamente)
-AFIP_TOKEN_CACHE_PATH=./.afip_token_cache_homo.json
-AFIP_WSDL_CACHE_PATH=./.afip_wsdl_cache.db
+AFIP_PUNTO_VENTA=1
+AFIP_RAZON_SOCIAL=Juan Pérez
+AFIP_DOMICILIO=Av. Corrientes 1234, CABA
 ```
-
----
 
 ## Uso
 
-> Activar el entorno virtual antes de usar: `source .venv/bin/activate`
-
-### Emitir factura simple
+### Emitir Factura C
 
 ```bash
-# Homologación (pruebas)
-python3 facturar.py emitir --homo \
-    --cuit-receptor 20111222333 \
-    --monto 15000 \
-    --concepto "Desarrollo de software — Mes de enero"
+# Consumidor final (condición IVA inferida automáticamente)
+python3 facturar.py emitir \
+  --concepto "Servicio de consultoría - junio 2026" \
+  --monto 5000 \
+  --env prod --pdf
 
-# Producción
-python3 facturar.py emitir --prod \
-    --cuit-receptor 20111222333 \
-    --monto 15000 \
-    --concepto "Desarrollo de software — Mes de enero" \
-    --condicion-venta "Transferencia bancaria 30 días"
+# Con CUIT (nombre y condición IVA se resuelven automáticamente del padrón)
+python3 facturar.py emitir \
+  --cuit-cliente 30-71234567-8 \
+  --concepto "Desarrollo web" \
+  --monto 80000 \
+  --env prod --pdf --duplicado
+
+# Especificando condición IVA explícitamente (alias o número)
+python3 facturar.py emitir \
+  --cuit-cliente 20-98765432-1 \
+  --condicion-iva RI \
+  --concepto "Consultoría" \
+  --monto 100000 \
+  --env prod --pdf
+
+# Con múltiples ítems (el monto se calcula automáticamente)
+python3 facturar.py emitir \
+  --item "Desarrollo|1|50000" \
+  --item "Soporte técnico|3|10000" \
+  --env prod --pdf --duplicado
 ```
 
-### Emitir factura con múltiples ítems
+### Condición IVA del receptor (`--condicion-iva`)
 
-```bash
-python3 facturar.py emitir --prod \
-    --cuit-receptor 30999888777 \
-    --item "Consultoría técnica" 10 5000 \
-    --item "Gastos de viaje" 1 2500 \
-    --concepto-afip 2          # 1=productos, 2=servicios, 3=ambos
-```
+Se puede pasar un **alias** o el **número** del código RG 5616. Si se omite, se infiere según el documento:
 
-### Emitir con período de servicio
-
-```bash
-python3 facturar.py emitir --prod \
-    --cuit-receptor 20111222333 \
-    --monto 30000 \
-    --concepto "Servicio mensual de soporte" \
-    --periodo-desde 20240101 \
-    --periodo-hasta 20240131
-```
-
-### Generar PDF (duplicado)
-
-Todos los comandos de emisión aceptan `--pdf` y `--duplicado`:
-
-```bash
-python3 facturar.py emitir --prod \
-    --cuit-receptor 20111222333 \
-    --monto 15000 \
-    --concepto "Servicio" \
-    --pdf factura_enero.pdf \
-    --duplicado
-```
-
-### Reimprimir desde JSON guardado
-
-Al emitir se puede guardar el JSON de respuesta:
-
-```bash
-python3 facturar.py emitir --prod --monto 1000 --concepto "..." | tee factura_001.json
-
-# Reimprimir luego
-python3 facturar.py reimprimir factura_001.json --duplicado
-python3 facturar.py reimprimir factura_001.json --output factura_copia.pdf
-```
-
-### Consultar comprobante desde AFIP
-
-```bash
-# Mostrar datos en JSON
-python3 facturar.py consultar --prod --numero 5
-
-# Generar PDF desde AFIP
-python3 facturar.py consultar --prod --numero 5 --pdf --duplicado
-```
-
-### Buscar comprobantes emitidos
-
-```bash
-# Por fecha
-python3 facturar.py buscar --prod --desde-fecha 20240101 --hasta-fecha 20240131
-
-# Por receptor
-python3 facturar.py buscar --prod --receptor 20111222333
-
-# Por rango de número
-python3 facturar.py buscar --prod --desde-numero 1 --hasta-numero 50
-```
+| Alias | ID | Descripción |
+|-------|----|-------------|
+| `CF`, `CONSUMIDOR_FINAL` | 5 | Consumidor Final *(default sin CUIT)* |
+| `RI`, `RESPONSABLE_INSCRIPTO` | 1 | IVA Responsable Inscripto *(default con CUIT)* |
+| `MONO`, `MONOTRIB` | 6 | Responsable Monotributo |
+| `EX`, `EXENTO` | 4 | IVA Sujeto Exento |
+| `RNI` | 2 | IVA Responsable No Inscripto |
+| `NR` | 3 | IVA No Responsable |
 
 ### Nota de Crédito / Débito
 
 ```bash
-python3 facturar.py emitir --prod \
-    --tipo NC \
-    --numero-original 5 \
-    --cuit-receptor 20111222333 \
-    --monto 15000 \
-    --concepto "Anulación factura N° 0004-00000005"
+python3 facturar.py nota-credito --numero-original 42 --monto 5000 --env prod
+python3 facturar.py nota-debito  --numero-original 42 --monto 1000 --env prod
+```
+
+### Consultar comprobantes
+
+```bash
+# Último número emitido
+python3 facturar.py ultimo-numero --tipo C --env prod
+
+# Consultar un comprobante específico (y opcionalmente generar PDF)
+python3 facturar.py consultar --numero 42 --tipo C --env prod --pdf
+
+# Buscar por rango de fechas o receptor
+python3 facturar.py buscar --desde-fecha 20260601 --hasta-fecha 20260630 --env prod
+python3 facturar.py buscar --receptor 30-71234567-8 --env prod
 ```
 
 ### Validar CUIT
 
 ```bash
-python3 facturar.py validar-cuit --prod 20111222333
+# Solo formato y dígito verificador
+python3 facturar.py validar-cuit 20-12345678-3
+
+# Confirmando existencia en el padrón de AFIP
+python3 facturar.py validar-cuit 20-12345678-3 --afip --env prod
 ```
 
-### Generar PDF manualmente (sin emitir)
-
-Útil para reimprimir facturas antiguas con datos manuales:
+### Generar PDF de un comprobante ya emitido
 
 ```bash
+# A partir de datos conocidos
 python3 facturar.py generar-pdf \
-    --numero 1 \
-    --fecha 20240115 \
-    --cae 74123456789012 \
-    --cae-vencimiento 20240125 \
-    --monto 15000 \
-    --concepto "Servicio de consultoría" \
-    --nombre-cliente "Juan Pérez" \
-    --output factura_reimpresa.pdf
+  --numero 42 \
+  --cae 86184331336401 \
+  --cae-vencimiento 20260615 \
+  --fecha 20260605 \
+  --monto 5000 \
+  --env prod
+
+# A partir del JSON devuelto por 'emitir'
+python3 facturar.py reimprimir factura_0001_00000042.json --env prod
 ```
 
----
+### Pruebas en homologación
+
+Usar `--env homo` (o simplemente omitir `--env`, que tiene `homo` como default) para emitir contra el ambiente de pruebas de AFIP sin consecuencias fiscales:
+
+```bash
+python3 facturar.py emitir --monto 100 --concepto "Prueba" --dry-run
+python3 facturar.py emitir --monto 100 --concepto "Prueba" --env homo
+```
+
+## Output JSON
+
+Todos los comandos emiten JSON por stdout:
+
+```json
+{
+  "status": "ok",
+  "comprobante": "0001-00000042",
+  "numero": 42,
+  "punto_venta": 1,
+  "cae": "86184331336401",
+  "cae_vencimiento": "20260615",
+  "tipo": "Factura C",
+  "fecha": "20260605",
+  "monto": "5000.00",
+  "cliente": "Nombre del receptor",
+  "cuit_cliente": "30712345678",
+  "condicion_iva_receptor": 1,
+  "condicion_iva_nombre": "IVA Responsable Inscripto",
+  "pdf": "factura_0001_00000042.pdf"
+}
+```
+
+Los errores también salen como JSON con exit code 1:
+
+```json
+{"error": "descripción del error"}
+```
 
 ## Estructura del proyecto
 
 ```
-.
-├── facturar.py          — CLI principal (punto de entrada)
-├── config.py            — Carga y validación de configuración (.env)
-├── models.py            — Modelos de datos: InvoiceRequest, InvoiceResponse, InvoiceItem
-├── wsaa.py              — Autenticación WSAA (obtención de token y firma)
-├── wsfev1.py            — Cliente WSFEv1: emisión, consulta y búsqueda de comprobantes
-├── padron.py            — Consulta al padrón A13 de AFIP (datos del receptor)
-├── pdf_generator.py     — Generación de PDF normativo con QR
-├── validators.py        — Validación de CUIT/CUIL (formato y padrón)
-├── ssl_transport.py     — Transporte HTTP con compatibilidad SSL legacy de AFIP
-├── generar_csr.py       — Utilidad para generar clave RSA y CSR PKCS#10
-├── requirements.txt     — Dependencias Python
-├── setup.sh             — Setup interactivo
-├── .env.example         — Plantilla de configuración
-└── certs/               — Directorio para certificado y clave (en .gitignore)
+afip-facturacion/
+├── facturar.py         # CLI principal (punto de entrada)
+├── models.py           # Modelos de datos (InvoiceRequest, InvoiceResponse, tablas IVA)
+├── config.py           # Carga de configuración desde .env
+├── wsaa.py             # Autenticación WSAA (token/sign)
+├── wsfev1.py           # Facturación WSFEv1 (solicitar CAE, consultar, buscar)
+├── padron.py           # Consulta al Padrón A13 de AFIP
+├── validators.py       # Validación de CUIT (formato + padrón)
+├── pdf_generator.py    # Generación de PDF con ReportLab
+├── ssl_transport.py    # Transporte HTTPS con certificado cliente
+├── generar_csr.py      # Helper para generar clave RSA + CSR para AFIP
+├── requirements.txt
+├── .env.example        # Variables de entorno requeridas (sin datos reales)
+├── .gitignore
+└── certs/              # Certificados (excluidos de git)
+    └── .gitkeep
 ```
-
----
-
-## Flujo de autenticación
-
-```
-facturar.py
-    └── wsaa.py → WSAA (LoginCms) → token + sign  [caché ~/.afip_token_cache_<env>.json]
-    └── wsfev1.py → WSFEv1 (FECAESolicitar) → CAE
-    └── padron.py → ws_sr_padron_a13 (getPersona) → nombre, domicilio
-```
-
-Los tokens WSAA tienen validez de ~12 horas y se reutilizan automáticamente.  
-Se mantienen cachés separados para producción y homologación, y para cada servicio web (wsfe, padrón).
-
----
 
 ## Seguridad
 
-- El archivo `.env` contiene su CUIT y rutas a certificados — **no lo comparta ni suba a Git**
-- La clave privada (`.key`) permite firmar en su nombre ante AFIP — **trátela como contraseña**
-- Los archivos sensibles están en `.gitignore` por defecto
-- El transporte usa `SECLEVEL=1` para compatibilidad con los servidores legacy de AFIP sin comprometer la autenticación de certificados del servidor
+- **Nunca subas** `.env`, certificados (`.pem`, `.crt`, `.key`) ni claves privadas al repositorio
+- El `.gitignore` ya los excluye por defecto
+- La clave privada RSA se genera localmente con `generar_csr.py` y nunca sale de tu máquina
 
----
+## Licencia
 
-## Entornos
-
-| Flag | Servicio | Uso |
-|------|----------|-----|
-| `--homo` | wswhomo.afip.gob.ar | Pruebas — los comprobantes no tienen validez |
-| `--prod` | servicios1.afip.gov.ar | Producción — comprobantes válidos ante AFIP |
-
-En homologación el punto de venta puede ser el número `1` aunque no esté registrado.
-
----
-
-## Notas
-
-- Soporta **Factura C** (monotributistas). Para otros tipos de comprobante (A, B) se requieren cambios en `models.py` y `wsfev1.py`.
-- El límite de Consumidor Final (`AFIP_LIMITE_CF`) cambia periódicamente — verificar el valor vigente en [afip.gob.ar](https://www.afip.gob.ar).
-- La búsqueda de comprobantes (`buscar`) consulta uno por uno vía `FECompConsultar`, por lo que puede ser lenta para rangos amplios.
+MIT

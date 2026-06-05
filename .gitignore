@@ -1,24 +1,24 @@
-# Configuración local (contiene datos sensibles)
+# Configuración local (contiene CUIT, paths de certificados)
 .env
 
-# Certificados y claves privadas — NUNCA subir a repositorios públicos
+# Certificados y claves criptográficas — NUNCA subir
 *.pem
 *.key
 *.crt
+*.cer
 *.pfx
 *.p12
-certs/*.csr
-certs/
+*.csr
+certs/*
+!certs/.gitkeep
 
-# Caché generado automáticamente
+# Caché de tokens WSAA y WSDL (se regeneran automáticamente)
 .afip_token_cache*.json
 .afip_wsdl_cache.db
-*.afip_token_cache*.json
 
-# Entorno virtual Python
-.venv/
-venv/
-env/
+# PDFs generados
+factura_*.pdf
+*.pdf
 
 # Python
 __pycache__/
@@ -27,11 +27,13 @@ __pycache__/
 *.pyd
 .Python
 
-# PDFs generados
-factura_*.pdf
-comprobante_*.pdf
+# Entornos virtuales
+.venv/
+venv/
+env/
+ENV/
 
-# Editores e IDEs
+# IDEs y editores
 .vscode/
 .idea/
 *.swp
@@ -40,3 +42,6 @@ comprobante_*.pdf
 
 # macOS
 .DS_Store
+
+# Logs
+*.log

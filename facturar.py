@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from config import ConfigError, load_config
-from models import CBTE_TIPO, InvoiceItem, InvoiceRequest
+from models import CBTE_TIPO, COND_IVA_ALIAS, COND_IVA_NOMBRE, InvoiceItem, InvoiceRequest
 
 
 def _last_day_of_month(d: date) -> date:
@@ -41,6 +41,59 @@ def _parse_item(raw: str) -> InvoiceItem:
     if qty <= 0 or price == 0:
         raise ValueError(f"Cantidad debe ser mayor a cero y precio distinto de cero en ítem: '{raw}'")
     return InvoiceItem(descripcion=desc.strip(), cantidad=qty, precio_unitario=price)
+
+
+def _parse_condicion_iva(raw: str) -> int:
+    """Acepta un número de condición IVA o un alias de texto (CF, RI, MONO, etc.).
+
+    Aliases disponibles:
+      CF / CONSUMIDOR_FINAL / FINAL        -> 5
+      RI / RESPONSABLE_INSCRIPTO           -> 1
+      EX / EXENTO / EXENTA                 -> 4
+      MONO / MONOTRIB / MONOTRIBUTISTA     -> 6
+      RNI / NO_INSCRIPTO                   -> 2
+      NR / NO_RESPONSABLE                  -> 3
+      NC / NO_CATEGORIZADO                 -> 7
+    """
+    raw = raw.strip()
+    if raw.isdigit():
+        val = int(raw)
+        if val not in COND_IVA_NOMBRE:
+            raise ValueError(
+                f"Condición IVA '{val}' desconocida. Valores válidos: "
+                + ", ".join(f"{k}={v}" for k, v in COND_IVA_NOMBRE.items())
+            )
+        return val
+    key = raw.upper().replace(" ", "_").replace("-", "_")
+    if key in COND_IVA_ALIAS:
+        return COND_IVA_ALIAS[key]
+    raise ValueError(
+        f"Condición IVA '{raw}' inválida. "
+        "Use un número (1-14) o un alias como: CF, RI, MONO, EX, RNI, NR."
+    )
+
+
+def _inferir_condicion_iva(config, doc_tipo: int, doc_nro: str, datos_padron: dict | None) -> int:
+    """Infiere la condición IVA del receptor cuando no se especifica explícitamente.
+
+    Lógica:
+    - doc_tipo 99 (sin identificar) → Consumidor Final (5)
+    - doc_tipo 96 (DNI)             → Consumidor Final (5)
+    - doc_tipo 80 (CUIT) con datos de padrón que indiquen monotributo → 6
+    - doc_tipo 80 (CUIT) sin padrón o sin categoría clara → RI (1) como default seguro
+    """
+    if doc_tipo in (99, 96):
+        return 5  # Consumidor Final
+    # CUIT: intentar extraer del padrón
+    if datos_padron:
+        cat = str(datos_padron.get("categoria_monotributo") or "").strip().upper()
+        if cat:  # cualquier categoría A-K indica monotributista
+            return 6
+        actividad = str(datos_padron.get("actividad_monotributo") or "").strip()
+        if actividad:
+            return 6
+    # Default para CUIT desconocido: RI
+    return 1
 
 
 def _output(data: dict, exit_code: int = 0) -> None:
@@ -110,7 +163,16 @@ def cmd_emitir(args) -> None:
     else:
         datos_padron = None
 
-    # Validar límite consumidor final
+    # Resolver condición IVA del receptor
+    if args.condicion_iva is not None:
+        try:
+            condicion_iva = _parse_condicion_iva(str(args.condicion_iva))
+        except ValueError as e:
+            _output({"error": str(e)}, 1)
+    else:
+        condicion_iva = _inferir_condicion_iva(config, doc_tipo, doc_nro, datos_padron)
+    condicion_iva_nombre = COND_IVA_NOMBRE.get(condicion_iva, str(condicion_iva))
+
     if doc_tipo == 99 and monto > config.limite_consumidor_final:
         _output({
             "error": (
@@ -163,6 +225,8 @@ def cmd_emitir(args) -> None:
                 "doc_tipo": doc_tipo,
                 "doc_nro": doc_nro,
                 "nombre_cliente": nombre_cliente,
+                "condicion_iva_receptor": condicion_iva,
+                "condicion_iva_nombre": condicion_iva_nombre,
                 "monto_total": str(monto),
                 "items": [
                     {"descripcion": i.descripcion, "cantidad": str(i.cantidad),
@@ -206,7 +270,7 @@ def cmd_emitir(args) -> None:
         fecha_vto_pago=fecha_vto_pago_afip,
         doc_tipo=doc_tipo,
         doc_nro=doc_nro,
-        condicion_iva_receptor=args.condicion_iva,
+        condicion_iva_receptor=condicion_iva,
         condicion_venta=condicion_venta,
         periodo_desde=periodo_desde if concepto_afip in (2, 3) else None,
         periodo_hasta=periodo_hasta if concepto_afip in (2, 3) else None,
@@ -226,6 +290,7 @@ def cmd_emitir(args) -> None:
         resp.domicilio_cliente = datos_padron.get("domicilio")
 
     result = resp.to_json()
+    result["condicion_iva_nombre"] = condicion_iva_nombre
 
     if getattr(args, "pdf", False):
         from pdf_generator import generate_pdf
@@ -605,8 +670,15 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Concepto general. Opcional si se usan --item")
     p_emit.add_argument("--concepto-afip", type=int, choices=[1, 2, 3], default=2,
                         metavar="{1,2,3}", help="1=productos 2=servicios(default) 3=ambos")
-    p_emit.add_argument("--condicion-iva", type=int, default=5, metavar="ID",
-                        help="Condición IVA receptor (RG 5616). Default: 5=Consumidor Final")
+    p_emit.add_argument("--condicion-iva", default=None, metavar="COND",
+                        help=(
+                            "Condición IVA del receptor. Puede ser un número (RG 5616) "
+                            "o un alias: CF=Consumidor Final, RI=Resp. Inscripto, "
+                            "MONO/MONOTRIB=Monotributista, EX/EXENTO=Exento, "
+                            "RNI=Resp. No Inscripto, NR=No Responsable. "
+                            "Si se omite, se infiere según el documento: "
+                            "sin CUIT/DNI → CF; DNI → CF; CUIT → RI (o Mono si el padrón lo indica)."
+                        ))
     p_emit.add_argument("--condicion-venta", default="Contado", metavar="COND")
     p_emit.add_argument("--fecha", metavar="YYYYMMDD", help="Default: hoy")
     p_emit.add_argument("--periodo-desde", metavar="YYYYMMDD")

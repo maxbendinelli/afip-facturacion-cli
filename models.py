@@ -21,6 +21,53 @@ DOC_TIPO_NOMBRE = {
     99: "",
 }
 
+# Condiciones IVA según RG 5616 / AFIP
+COND_IVA_NOMBRE = {
+    1: "IVA Responsable Inscripto",
+    2: "IVA Responsable No Inscripto",
+    3: "IVA No Responsable",
+    4: "IVA Sujeto Exento",
+    5: "Consumidor Final",
+    6: "Responsable Monotributo",
+    7: "Sujeto No Categorizado",
+    8: "Importador del Exterior",
+    9: "Cliente del Exterior",
+    10: "IVA Liberado - Ley N° 19.640",
+    11: "IVA Responsable Inscripto - Agente de Percepción",
+    12: "Pequeño Contribuyente Eventual",
+    13: "Monotributista Social",
+    14: "Pequeño Contribuyente Eventual Social",
+}
+
+# Alias de nombre corto → ID de condición IVA
+COND_IVA_ALIAS = {
+    # Responsable Inscripto
+    "RI": 1,
+    "RESPONSABLE_INSCRIPTO": 1,
+    "INSCRIPTO": 1,
+    # Responsable No Inscripto (categoría histórica)
+    "RNI": 2,
+    "NO_INSCRIPTO": 2,
+    # No Responsable
+    "NR": 3,
+    "NO_RESPONSABLE": 3,
+    # Exento
+    "EX": 4,
+    "EXENTO": 4,
+    "EXENTA": 4,
+    # Consumidor Final
+    "CF": 5,
+    "CONSUMIDOR_FINAL": 5,
+    "FINAL": 5,
+    # Monotributista
+    "MONO": 6,
+    "MONOTRIB": 6,
+    "MONOTRIBUTISTA": 6,
+    # No categorizado
+    "NC": 7,
+    "NO_CATEGORIZADO": 7,
+}
+
 
 @dataclass
 class InvoiceItem:
