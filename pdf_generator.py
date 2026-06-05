@@ -14,7 +14,9 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
-from reportlab.platypus import Table, TableStyle
+from reportlab.platypus import Paragraph, Table, TableStyle
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.enums import TA_LEFT
 
 from config import Config
 from models import CBTE_NOMBRE, DOC_TIPO_NOMBRE, InvoiceResponse
@@ -237,11 +239,27 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
     by -= 5.5 * mm
     _lv(c, bl, by, "Condición de venta:  ", resp.condicion_venta, fs)
 
+    # Nombre del receptor: si es largo, achicamos la fuente para que entre
     by2 = y - 5.5 * mm
-    _lv(c, br, by2, "Apellido y Nombre / Razón Social:  ",
-        resp.nombre_cliente or "Consumidor Final", fs)
+    nombre_receptor = resp.nombre_cliente or "Consumidor Final"
+    right_col_w = CONTENT_W - BLEFT_W - 6 * mm  # espacio disponible
+    lbl_rs = "Apellido y Nombre / Razón Social:  "
+    lbl_w = c.stringWidth(lbl_rs, "Helvetica-Bold", fs)
+    max_nombre_w = right_col_w - lbl_w
+    nombre_fs = fs
+    while nombre_fs > 6 and c.stringWidth(nombre_receptor, "Helvetica", nombre_fs) > max_nombre_w:
+        nombre_fs -= 0.5
+    _lv(c, br, by2, lbl_rs, nombre_receptor, nombre_fs)
     by2 -= 5.5 * mm
-    _lv(c, br, by2, "Domicilio:  ", resp.domicilio_cliente or "", fs)
+    # Domicilio: mismo tratamiento
+    domicilio_txt = resp.domicilio_cliente or ""
+    dom_fs = fs
+    lbl_dom = "Domicilio:  "
+    lbl_dom_w = c.stringWidth(lbl_dom, "Helvetica-Bold", dom_fs)
+    max_dom_w = right_col_w - lbl_dom_w
+    while dom_fs > 6 and c.stringWidth(domicilio_txt, "Helvetica", dom_fs) > max_dom_w:
+        dom_fs -= 0.5
+    _lv(c, br, by2, lbl_dom, domicilio_txt, dom_fs)
 
     y -= BUYER_H
     y -= 2 * mm
@@ -260,12 +278,33 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
     hdr = ["Código", "Producto / Servicio", "Cantidad", "U. Medida",
            "Precio Unit.", "% Bonif", "Imp. Bonif.", "Subtotal"]
 
+    # Estilo para párrafos con word-wrap en la columna de descripción
+    _desc_style = ParagraphStyle(
+        "ItemDesc",
+        fontName="Helvetica",
+        fontSize=7.5,
+        leading=9,
+        alignment=TA_LEFT,
+        wordWrap="CJK",
+    )
+    _desc_hdr_style = ParagraphStyle(
+        "ItemDescHdr",
+        fontName="Helvetica-Bold",
+        fontSize=7.5,
+        leading=9,
+        alignment=TA_LEFT,
+    )
+
     if resp.items:
-        rows = [hdr]
+        rows = [[
+            hdr[0],
+            Paragraph(hdr[1], _desc_hdr_style),
+            hdr[2], hdr[3], hdr[4], hdr[5], hdr[6], hdr[7],
+        ]]
         for item in resp.items:
             rows.append([
                 "",
-                item.descripcion,
+                Paragraph(item.descripcion, _desc_style),
                 _fmt_num(item.cantidad),
                 "unidades",
                 _fmt_num(item.precio_unitario),
@@ -275,17 +314,25 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
             ])
         subtotal = sum(i.subtotal for i in resp.items)
     else:
-        rows = [hdr, [
-            "", resp.concepto or "-",
-            _fmt_num(Decimal("1.00")), "unidades",
-            _fmt_num(resp.monto),
-            _fmt_num(Decimal("0.00")),
-            _fmt_num(Decimal("0.00")),
-            _fmt_num(resp.monto),
-        ]]
+        rows = [
+            [
+                hdr[0],
+                Paragraph(hdr[1], _desc_hdr_style),
+                hdr[2], hdr[3], hdr[4], hdr[5], hdr[6], hdr[7],
+            ],
+            [
+                "",
+                Paragraph(resp.concepto or "-", _desc_style),
+                _fmt_num(Decimal("1.00")), "unidades",
+                _fmt_num(resp.monto),
+                _fmt_num(Decimal("0.00")),
+                _fmt_num(Decimal("0.00")),
+                _fmt_num(resp.monto),
+            ],
+        ]
         subtotal = resp.monto
 
-    t = Table(rows, colWidths=col_w)
+    t = Table(rows, colWidths=col_w, repeatRows=1)
     t.setStyle(TableStyle([
         ("FONTNAME",      (0, 0), (-1,  0), "Helvetica-Bold"),
         ("FONTNAME",      (0, 1), (-1, -1), "Helvetica"),
@@ -293,6 +340,7 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
         ("GRID",          (0, 0), (-1, -1), 0.4, colors.black),
         ("ALIGN",         (2, 0), (-1, -1), "RIGHT"),
         ("ALIGN",         (0, 0), ( 1, -1), "LEFT"),
+        ("VALIGN",        (0, 0), (-1, -1), "TOP"),
         ("BACKGROUND",    (0, 0), (-1,  0), _GREY),
         ("TOPPADDING",    (0, 0), (-1, -1), 3),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
