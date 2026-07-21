@@ -39,6 +39,45 @@ cp .env.example .env
 # Editar .env con tu CUIT, paths de certificado y punto de venta
 ```
 
+## Servidor MCP (Model Context Protocol)
+
+El proyecto incluye un **servidor MCP** (`mcp_server.py`) listo para integrarse como herramienta (tools) en cualquier cliente o asistente de IA (Claude Desktop, Cursor, Antigravity, N8N, etc.).
+
+### Ejecución del servidor MCP
+
+```bash
+python3 mcp_server.py
+```
+
+### Configuración en clientes MCP (`mcp.json` / Claude Desktop)
+
+```json
+{
+  "mcpServers": {
+    "afip-facturacion": {
+      "command": "python3",
+      "args": ["/ruta/absoluta/a/afip/mcp_server.py"],
+      "env": {
+        "AFIP_CUIT": "20123456789",
+        "AFIP_CERT_PATH": "/ruta/absoluta/a/certs/afip_20123456789.crt",
+        "AFIP_KEY_PATH": "/ruta/absoluta/a/certs/afip_20123456789.key",
+        "AFIP_PUNTO_VENTA": "1"
+      }
+    }
+  }
+}
+```
+
+### Herramientas (Tools) expuestas por el servidor MCP:
+
+- `emitir_factura`: Emite Facturas C (Consumidor Final o por CUIT).
+- `emitir_nota_credito`: Emite Notas de Crédito C asociadas a una factura.
+- `emitir_nota_debito`: Emite Notas de Débito C asociadas a una factura.
+- `consultar_ultimo_comprobante`: Obtiene el último número emitido en AFIP.
+- `consultar_comprobante`: Consulta detalles de un comprobante en AFIP.
+- `consultar_padron_a13`: Busca datos de una persona/empresa en el padrón AFIP.
+- `validar_cuit`: Valida formato y existencia fiscal de un CUIT.
+
 ## Configuración inicial
 
 ### 1. Generar clave privada y CSR
