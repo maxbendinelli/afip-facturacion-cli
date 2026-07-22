@@ -440,4 +440,18 @@ def validar_cuit(cuit: str, consultar_afip: bool = True, env: str = "homo") -> d
 
 
 if __name__ == "__main__":
-    mcp.run()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Servidor MCP para Facturación AFIP/ARCA")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse"],
+        default="stdio",
+        help="Tipo de transporte MCP: 'stdio' (para IDEs y agentes locales) o 'sse' (servidor HTTP / SSE)",
+    )
+    args = parser.parse_args()
+
+    if args.transport == "sse":
+        mcp.run(transport="sse")
+    else:
+        mcp.run(transport="stdio")

@@ -59,16 +59,20 @@ AFIP_DOMICILIO=Av. Ejemplo 1234, CABA
 
 ---
 
-## 3. Uso del Servidor MCP (`mcp_server.py`)
+## 3. Uso del Servidor MCP (`mcp_server.py`) - Multiplataforma
 
-El proyecto incluye un **servidor MCP** listo para que asistentes o agentes de IA ejecuten funciones de facturación directamente como herramientas (Tools).
+El proyecto incluye un **servidor MCP** interoperable para que cualquier cliente de IA (Cursor, Antigravity/Gemini, VS Code, Windsurf, Zed, Claude, n8n, OpenAI Assistants, etc.) ejecute funciones de facturación como herramientas (*Tools*).
 
-### Iniciar el servidor
+### Modos de Inicio
 ```bash
-python3 mcp_server.py
+# Modo STDIO (IDEs y asistentes locales)
+python3 mcp_server.py --transport stdio
+
+# Modo SSE / HTTP (servicios web, n8n, asistentes remotos)
+python3 mcp_server.py --transport sse
 ```
 
-### Configuración en clientes MCP (`mcp.json` / Claude Desktop)
+### Configuración en clientes MCP (`mcp.json` en Cursor, Antigravity, VS Code, Claude, etc.)
 ```json
 {
   "mcpServers": {

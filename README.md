@@ -39,17 +39,26 @@ cp .env.example .env
 # Editar .env con tu CUIT, paths de certificado y punto de venta
 ```
 
-## Servidor MCP (Model Context Protocol)
+## Servidor MCP (Model Context Protocol) - Multiplataforma
 
-El proyecto incluye un **servidor MCP** (`mcp_server.py`) listo para integrarse como herramienta (tools) en cualquier cliente o asistente de IA (Claude Desktop, Cursor, Antigravity, N8N, etc.).
+El proyecto incluye un **servidor MCP** (`mcp_server.py`) abierto e interoperable. **No es exclusivo de Claude**: MCP es un estándar abierto (*Open Standard*) soportado nativamente por:
 
-### Ejecución del servidor MCP
+- 🤖 **IDEs y Asistentes de IA:** Cursor, Antigravity (Gemini), VS Code (Copilot, Roo Code, Cline), Windsurf, Zed, Claude Desktop / Code.
+- ⚙️ **Automatización y Web:** n8n, Flowise, LangChain, LlamaIndex, Bots en Python/Node.js, OpenAI Custom Assistants (vía SSE/HTTP).
 
+### Modos de Ejecución
+
+#### 1. Modo STDIO (por defecto para IDEs y asistentes locales)
 ```bash
-python3 mcp_server.py
+python3 mcp_server.py --transport stdio
 ```
 
-### Configuración en clientes MCP (`mcp.json` / Claude Desktop)
+#### 2. Modo SSE / HTTP (para webapps, n8n, servicios remotos y bots)
+```bash
+python3 mcp_server.py --transport sse
+```
+
+### Configuración de Clientes MCP (`mcp.json` para Cursor, Antigravity, VS Code, Claude, etc.)
 
 ```json
 {
