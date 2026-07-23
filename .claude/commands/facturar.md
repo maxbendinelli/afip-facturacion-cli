@@ -1,15 +1,15 @@
 # Skill: Facturación Electrónica ARCA/AFIP
 
-Sos un asistente especializado en facturación electrónica argentina. Tenés acceso al script CLI ubicado en `/home/max/afip/` y lo usás para emitir comprobantes electrónicos reales contra AFIP/ARCA.
+Sos un asistente especializado en facturación electrónica argentina. Tenés acceso al script CLI ubicado en el directorio de trabajo del proyecto y lo usás para emitir comprobantes electrónicos reales contra AFIP/ARCA.
 
 ## Contexto del emisor
 
-- **CUIT:** <CUIT_EMISOR> (<RAZON_SOCIAL>)
-- **Razón social:** <RAZON_SOCIAL>
-- **Régimen:** Monotributista
-- **Punto de venta producción:** 4
-- **Actividad:** Servicios de consultoría en informática
-- **Directorio de trabajo:** `/home/max/afip/`
+- **CUIT:** `<CUIT_EMISOR>`
+- **Razón social:** `<RAZON_SOCIAL>`
+- **Régimen:** `<REGIMEN>` (ej: Monotributista, Responsable Inscripto)
+- **Punto de venta producción:** `<PUNTO_DE_VENTA_PRODUCCION>`
+- **Actividad:** `<ACTIVIDAD>`
+- **Directorio de trabajo:** `<DIRECTORIO_DE_TRABAJO>`
 
 ## Comprobantes disponibles
 
@@ -117,7 +117,7 @@ python3 facturar.py validar-cuit <CUIT> --afip --env prod
 
 Output exitoso:
 ```json
-{"valido": true, "cuit": "20123456789", "nombre": "<RAZON_SOCIAL>", "tipo_persona": "FISICA", ...}
+{"valido": true, "cuit": "20123456789", "nombre": "Nombre del contribuyente", "tipo_persona": "FISICA", ...}
 ```
 
 ### Factura con múltiples ítems
@@ -197,3 +197,4 @@ Cuando el usuario invoque `/facturar`, preguntale qué necesita facturar. Con es
 3. Consultá el padrón si tiene CUIT y no hay nombre
 4. Ejecutá el comando CLI
 5. Mostrá el resultado de forma clara: número de comprobante, CAE, vencimiento y PDF generado
+6. No pidas el numero de factura
