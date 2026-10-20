@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass, field
 from decimal import Decimal
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -24,7 +25,11 @@ class Config:
     nombre_fantasia: str = ""
     domicilio: str = ""
     domicilio_fiscal: str = ""
+    condicion_iva_emisor: str = ""
     logo_path: str = ""
+    leyenda: str = ""
+    watermark_text: str = ""
+    watermark_image: str = ""
     inicio_actividades: str = ""
     ingresos_brutos: str = ""
     limite_consumidor_final: Decimal = field(default_factory=lambda: Decimal("97673.32"))
@@ -45,7 +50,7 @@ class Config:
     def padron_wsdl(self) -> str:
         if self.env == "prod":
             return "https://aws.afip.gov.ar/sr-padron/webservices/personaServiceA13?WSDL"
-        return "https://awshomo.afip.gov.ar/sr-padron/webservices/personaServiceA13?WSDL"
+        return "https://awshomo.afip.gob.ar/sr-padron/webservices/personaServiceA13?WSDL"
 
 
 def _resolve_cache_path(base: str, env: str) -> str:
@@ -59,6 +64,7 @@ def _resolve_cache_path(base: str, env: str) -> str:
 
 
 def load_config(env: str = "homo", dry_run: bool = False) -> Config:
+    load_dotenv(override=True)
     if env not in ("homo", "prod"):
         raise ConfigError(f"Entorno inválido: '{env}'. Use 'homo' o 'prod'.")
 
@@ -115,8 +121,41 @@ def load_config(env: str = "homo", dry_run: bool = False) -> Config:
         nombre_fantasia=os.getenv("AFIP_NOMBRE_FANTASIA", ""),
         domicilio=os.getenv("AFIP_DOMICILIO", ""),
         domicilio_fiscal=os.getenv("AFIP_DOMICILIO_FISCAL", "") or os.getenv("AFIP_DOMICILIO", ""),
+        condicion_iva_emisor=os.getenv("AFIP_CONDICION_IVA_EMISOR", ""),
         logo_path=os.getenv("AFIP_LOGO_PATH", ""),
+        leyenda=os.getenv("AFIP_LEYENDA", ""),
+        watermark_text=os.getenv("AFIP_WATERMARK_TEXT", ""),
+        watermark_image=os.getenv("AFIP_WATERMARK_IMAGE", ""),
         inicio_actividades=os.getenv("AFIP_INICIO_ACTIVIDADES", ""),
         ingresos_brutos=os.getenv("AFIP_INGRESOS_BRUTOS", ""),
         limite_consumidor_final=limite_cf,
     )
+
+
+def save_env_config(updates: dict, env_path: str = ".env") -> None:
+    """Actualiza o agrega variables en el archivo .env manteniendo el formato existente."""
+    lines = []
+    found_keys = set()
+    p = Path(env_path)
+
+    if p.exists():
+        with open(p, "r", encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#") and "=" in stripped:
+                    key = stripped.split("=", 1)[0].strip()
+                    if key in updates:
+                        val = updates[key]
+                        lines.append(f"{key}={val}\n")
+                        found_keys.add(key)
+                        continue
+                lines.append(line)
+
+    for k, v in updates.items():
+        if k not in found_keys:
+            lines.append(f"{k}={v}\n")
+
+    with open(p, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+
+    load_dotenv(override=True)

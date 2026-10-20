@@ -1,8 +1,10 @@
 """
-Generador de PDF para comprobantes electrónicos AFIP/ARCA.
-Layout basado en el modelo oficial del facturador online de ARCA.
+Generador de PDF para comprobantes electrónicos AFIP/ARCA (Facturas A, B, C, NC y ND).
+Layout basado en el modelo oficial del facturador online de ARCA con soporte para
+personalización: Logo, Leyenda / Datos bancarios y Marca de agua (Watermark).
 """
 import base64
+from collections import defaultdict
 import io
 import json
 import os
@@ -19,7 +21,14 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_LEFT
 
 from config import Config
-from models import CBTE_NOMBRE, DOC_TIPO_NOMBRE, InvoiceResponse
+from models import (
+    CBTE_NOMBRE,
+    CBTE_LETRA,
+    DOC_TIPO_NOMBRE,
+    InvoiceResponse,
+    IVA_ALICUOTAS,
+    COND_IVA_TODAS,
+)
 
 PAGE_W, PAGE_H = A4
 MARGIN = 15 * mm
@@ -27,17 +36,12 @@ CONTENT_W = PAGE_W - 2 * MARGIN
 
 _GREY = colors.Color(0.90, 0.90, 0.90)
 
-_COND_IVA = {
-    1: "IVA Responsable Inscripto",
-    2: "IVA Responsable No Inscripto",
-    3: "IVA No Responsable",
-    4: "IVA Exento",
-    5: "Consumidor Final",
-    6: "Responsable Monotributo",
-}
+_COND_IVA = COND_IVA_TODAS
+
 
 
 def _fmt_cuit(cuit: str) -> str:
+    cuit = str(cuit).strip()
     if len(cuit) == 11:
         return f"{cuit[:2]}-{cuit[2:10]}-{cuit[10]}"
     return cuit
@@ -77,7 +81,7 @@ def _build_qr_url(config: Config, resp: InvoiceResponse) -> str:
         "moneda": "PES",
         "ctz": 1,
         "tipoDocRec": resp.doc_tipo,
-        "nroDocRec": int(resp.cuit_cliente) if resp.cuit_cliente.isdigit() else 0,
+        "nroDocRec": int(resp.cuit_cliente) if str(resp.cuit_cliente).isdigit() else 0,
         "tipoCodAut": "E",
         "codAut": int(resp.cae),
     }
@@ -113,6 +117,27 @@ def _lv(c: canvas.Canvas, x: float, y: float, label: str, value: str, size: floa
 
 def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
                       y_start: float, label: str) -> None:
+    # ── MARCA DE AGUA (WATERMARK) ───────────────────────────────────────────
+    if config.watermark_text:
+        c.saveState()
+        c.setFont("Helvetica-Bold", 46)
+        c.setFillColor(colors.Color(0.88, 0.88, 0.88, alpha=0.18))
+        c.translate(PAGE_W / 2, PAGE_H / 2)
+        c.rotate(45)
+        c.drawCentredString(0, 0, config.watermark_text.upper())
+        c.restoreState()
+
+    if config.watermark_image and os.path.isfile(config.watermark_image):
+        c.saveState()
+        try:
+            wm_w = 90 * mm
+            wm_h = 90 * mm
+            c.drawImage(config.watermark_image, (PAGE_W - wm_w) / 2, (PAGE_H - wm_h) / 2,
+                        width=wm_w, height=wm_h, mask='auto', preserveAspectRatio=True)
+        except Exception:
+            pass
+        c.restoreState()
+
     y = y_start
     c.setStrokeColor(colors.black)
     c.setFillColor(colors.black)
@@ -120,10 +145,18 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
 
     tipo_nombre = CBTE_NOMBRE.get(resp.cbte_tipo, "Comprobante")
     parts = tipo_nombre.split()
-    letra = parts[-1]
-    tipo_text = " ".join(parts[:-1]).upper()
-    cod_afip = {11: "011", 12: "012", 13: "013"}.get(resp.cbte_tipo, f"0{resp.cbte_tipo:02d}")
+    letra = CBTE_LETRA.get(resp.cbte_tipo, parts[-1] if parts else "C")
+    tipo_text = " ".join(parts[:-1]).upper() if len(parts) > 1 else tipo_nombre.upper()
+    cod_afip = f"{resp.cbte_tipo:03d}"
     razon = (config.razon_social or "").upper()
+
+    # Condición IVA Emisor
+    cond_emisor = config.condicion_iva_emisor
+    if not cond_emisor:
+        if resp.cbte_tipo in (1, 2, 3, 4, 6, 7, 8, 9):
+            cond_emisor = "IVA Responsable Inscripto"
+        else:
+            cond_emisor = "Responsable Monotributo"
 
     # ── LABEL (ORIGINAL / DUPLICADO / TRIPLICADO) ────────────────────────────
     label_h = 10 * mm
@@ -146,13 +179,35 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
     c.line(mid_x, box_bot, mid_x, y)
     c.line(right_x, box_bot, right_x, y)
 
-    # Columna izquierda
+    # Columna izquierda: Logo y/o Razón Social
     pad_l = left_x + 3 * mm
-    c.setFont("Helvetica-Bold", 11)
-    c.drawCentredString(left_x + LEFT_W / 2, y - 8 * mm, razon)
+    has_logo = bool(config.logo_path and os.path.isfile(config.logo_path))
+
+    if has_logo:
+        try:
+            logo_max_w = LEFT_W - 8 * mm
+            logo_max_h = 14 * mm
+            c.drawImage(
+                config.logo_path,
+                left_x + 4 * mm,
+                y - 16 * mm,
+                width=logo_max_w,
+                height=logo_max_h,
+                preserveAspectRatio=True,
+                anchor='c',
+                mask='auto'
+            )
+            c.setFont("Helvetica-Bold", 9)
+            c.drawCentredString(left_x + LEFT_W / 2, y - 20 * mm, razon)
+        except Exception:
+            c.setFont("Helvetica-Bold", 11)
+            c.drawCentredString(left_x + LEFT_W / 2, y - 8 * mm, razon)
+    else:
+        c.setFont("Helvetica-Bold", 11)
+        c.drawCentredString(left_x + LEFT_W / 2, y - 8 * mm, razon)
 
     line_y = box_bot + 3 * mm
-    _lv(c, pad_l, line_y, "Condición frente al IVA:  ", "Responsable Monotributo", 8)
+    _lv(c, pad_l, line_y, "Condición frente al IVA:  ", cond_emisor, 8)
     line_y += 5 * mm
     if config.domicilio:
         max_w = LEFT_W - 6 * mm
@@ -239,10 +294,10 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
     by -= 5.5 * mm
     _lv(c, bl, by, "Condición de venta:  ", resp.condicion_venta, fs)
 
-    # Nombre del receptor: si es largo, achicamos la fuente para que entre
+    # Nombre del receptor
     by2 = y - 5.5 * mm
     nombre_receptor = resp.nombre_cliente or "Consumidor Final"
-    right_col_w = CONTENT_W - BLEFT_W - 6 * mm  # espacio disponible
+    right_col_w = CONTENT_W - BLEFT_W - 6 * mm
     lbl_rs = "Apellido y Nombre / Razón Social:  "
     lbl_w = c.stringWidth(lbl_rs, "Helvetica-Bold", fs)
     max_nombre_w = right_col_w - lbl_w
@@ -251,7 +306,8 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
         nombre_fs -= 0.5
     _lv(c, br, by2, lbl_rs, nombre_receptor, nombre_fs)
     by2 -= 5.5 * mm
-    # Domicilio: mismo tratamiento
+
+    # Domicilio
     domicilio_txt = resp.domicilio_cliente or ""
     dom_fs = fs
     lbl_dom = "Domicilio:  "
@@ -264,21 +320,7 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
     y -= BUYER_H
     y -= 2 * mm
 
-    # ── TABLA DE ÍTEMS (8 columnas) ──────────────────────────────────────────
-    col_w = [
-        CONTENT_W * 0.055,   # Código
-        CONTENT_W * 0.340,   # Producto / Servicio
-        CONTENT_W * 0.090,   # Cantidad
-        CONTENT_W * 0.110,   # U. Medida
-        CONTENT_W * 0.120,   # Precio Unit.
-        CONTENT_W * 0.075,   # % Bonif
-        CONTENT_W * 0.080,   # Imp. Bonif.
-        CONTENT_W * 0.130,   # Subtotal
-    ]
-    hdr = ["Código", "Producto / Servicio", "Cantidad", "U. Medida",
-           "Precio Unit.", "% Bonif", "Imp. Bonif.", "Subtotal"]
-
-    # Estilo para párrafos con word-wrap en la columna de descripción
+    # ── ESTILOS DE DESCRIPCIÓN ───────────────────────────────────────────────
     _desc_style = ParagraphStyle(
         "ItemDesc",
         fontName="Helvetica",
@@ -295,42 +337,92 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
         alignment=TA_LEFT,
     )
 
-    if resp.items:
-        rows = [[
-            hdr[0],
-            Paragraph(hdr[1], _desc_hdr_style),
-            hdr[2], hdr[3], hdr[4], hdr[5], hdr[6], hdr[7],
-        ]]
-        for item in resp.items:
-            rows.append([
-                "",
-                Paragraph(item.descripcion, _desc_style),
-                _fmt_num(item.cantidad),
-                "unidades",
-                _fmt_num(item.precio_unitario),
-                _fmt_num(Decimal("0.00")),
-                _fmt_num(Decimal("0.00")),
-                _fmt_num(item.subtotal),
-            ])
-        subtotal = sum(i.subtotal for i in resp.items)
-    else:
-        rows = [
-            [
-                hdr[0],
-                Paragraph(hdr[1], _desc_hdr_style),
-                hdr[2], hdr[3], hdr[4], hdr[5], hdr[6], hdr[7],
-            ],
-            [
-                "",
-                Paragraph(resp.concepto or "-", _desc_style),
-                _fmt_num(Decimal("1.00")), "unidades",
-                _fmt_num(resp.monto),
-                _fmt_num(Decimal("0.00")),
-                _fmt_num(Decimal("0.00")),
-                _fmt_num(resp.monto),
-            ],
+    es_factura_a = resp.cbte_tipo in (1, 2, 3)
+
+    if es_factura_a:
+        col_w = [
+            CONTENT_W * 0.060,   # Código
+            CONTENT_W * 0.380,   # Producto / Servicio
+            CONTENT_W * 0.080,   # Cantidad
+            CONTENT_W * 0.100,   # U. Medida
+            CONTENT_W * 0.120,   # Precio Unit.
+            CONTENT_W * 0.100,   # % Alícuota IVA
+            CONTENT_W * 0.160,   # Subtotal
         ]
-        subtotal = resp.monto
+        hdr = ["Código", "Producto / Servicio", "Cantidad", "U. Medida",
+               "Precio Unit.", "Alícuota IVA", "Subtotal"]
+
+        if resp.items:
+            rows = [[
+                hdr[0], Paragraph(hdr[1], _desc_hdr_style), hdr[2], hdr[3], hdr[4], hdr[5], hdr[6]
+            ]]
+            for item in resp.items:
+                alic_text = f"{getattr(item, 'alicuota_iva', Decimal('21.0'))}%"
+                rows.append([
+                    "",
+                    Paragraph(item.descripcion, _desc_style),
+                    _fmt_num(item.cantidad),
+                    "unidades",
+                    _fmt_num(item.precio_unitario),
+                    alic_text,
+                    _fmt_num(item.subtotal),
+                ])
+            subtotal_neto = sum(i.subtotal for i in resp.items)
+        else:
+            rows = [
+                [hdr[0], Paragraph(hdr[1], _desc_hdr_style), hdr[2], hdr[3], hdr[4], hdr[5], hdr[6]],
+                [
+                    "", Paragraph(resp.concepto or "-", _desc_style),
+                    _fmt_num(Decimal("1.00")), "unidades",
+                    _fmt_num(resp.imp_neto if resp.imp_neto is not None else resp.monto),
+                    "21%",
+                    _fmt_num(resp.imp_neto if resp.imp_neto is not None else resp.monto),
+                ],
+            ]
+            subtotal_neto = resp.imp_neto if resp.imp_neto is not None else resp.monto
+    else:
+        col_w = [
+            CONTENT_W * 0.055,   # Código
+            CONTENT_W * 0.340,   # Producto / Servicio
+            CONTENT_W * 0.090,   # Cantidad
+            CONTENT_W * 0.110,   # U. Medida
+            CONTENT_W * 0.120,   # Precio Unit.
+            CONTENT_W * 0.075,   # % Bonif
+            CONTENT_W * 0.080,   # Imp. Bonif.
+            CONTENT_W * 0.130,   # Subtotal
+        ]
+        hdr = ["Código", "Producto / Servicio", "Cantidad", "U. Medida",
+               "Precio Unit.", "% Bonif", "Imp. Bonif.", "Subtotal"]
+
+        if resp.items:
+            rows = [[
+                hdr[0], Paragraph(hdr[1], _desc_hdr_style), hdr[2], hdr[3], hdr[4], hdr[5], hdr[6], hdr[7]
+            ]]
+            for item in resp.items:
+                rows.append([
+                    "",
+                    Paragraph(item.descripcion, _desc_style),
+                    _fmt_num(item.cantidad),
+                    "unidades",
+                    _fmt_num(item.precio_unitario),
+                    _fmt_num(Decimal("0.00")),
+                    _fmt_num(Decimal("0.00")),
+                    _fmt_num(item.subtotal),
+                ])
+            subtotal_neto = sum(i.subtotal for i in resp.items)
+        else:
+            rows = [
+                [hdr[0], Paragraph(hdr[1], _desc_hdr_style), hdr[2], hdr[3], hdr[4], hdr[5], hdr[6], hdr[7]],
+                [
+                    "", Paragraph(resp.concepto or "-", _desc_style),
+                    _fmt_num(Decimal("1.00")), "unidades",
+                    _fmt_num(resp.monto),
+                    _fmt_num(Decimal("0.00")),
+                    _fmt_num(Decimal("0.00")),
+                    _fmt_num(resp.monto),
+                ],
+            ]
+            subtotal_neto = resp.monto
 
     t = Table(rows, colWidths=col_w, repeatRows=1)
     t.setStyle(TableStyle([
@@ -350,14 +442,50 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
     t.wrapOn(c, CONTENT_W, 500 * mm)
     t_h = t._height
     t.drawOn(c, MARGIN, y - t_h)
-    y -= t_h + 4 * mm
+    y -= t_h + 3 * mm
 
-    # ── TOTALES (tabla de lado a lado) ───────────────────────────────────────
-    totals_data = [
-        ["Subtotal: $", _fmt_num(subtotal)],
-        ["Importe Otros Tributos: $", _fmt_num(Decimal("0.00"))],
-        ["Importe Total: $", _fmt_num(resp.monto)],
-    ]
+    # ── LEYENDA ADICIONAL / DATOS DE PAGO (SI ESTÁ CONFIGURADA) ──────────────
+    if getattr(config, "leyenda", None) and config.leyenda.strip():
+        _leyenda_style = ParagraphStyle(
+            "Leyenda",
+            fontName="Helvetica",
+            fontSize=7.5,
+            leading=9.5,
+            textColor=colors.Color(0.2, 0.2, 0.2),
+            alignment=TA_LEFT,
+        )
+        leyenda_clean = config.leyenda.strip().replace("\n", "<br/>")
+        leyenda_p = Paragraph(f"<b>Información adicional / Datos de pago:</b><br/>{leyenda_clean}", _leyenda_style)
+        l_w, l_h = leyenda_p.wrap(CONTENT_W - 6 * mm, 30 * mm)
+        box_h = l_h + 3 * mm
+        c.setFillColor(colors.Color(0.96, 0.96, 0.96))
+        c.roundRect(MARGIN, y - box_h, CONTENT_W, box_h, 2, fill=1, stroke=1)
+        c.setFillColor(colors.black)
+        leyenda_p.drawOn(c, MARGIN + 3 * mm, y - box_h + 1.5 * mm)
+        y -= box_h + 3 * mm
+
+    # ── TOTALES ──────────────────────────────────────────────────────────────
+    if es_factura_a:
+        totals_data = [
+            ["Importe Neto Gravado: $", _fmt_num(resp.imp_neto if resp.imp_neto is not None else subtotal_neto)],
+        ]
+        if resp.ivas:
+            for iv in resp.ivas:
+                alic_id = int(iv["Id"])
+                porc_desc = IVA_ALICUOTAS.get(alic_id, {}).get("desc", f"Alic. {alic_id}")
+                totals_data.append([f"IVA {porc_desc}: $", _fmt_num(iv.get("Importe", "0.00"))])
+        elif resp.imp_iva:
+            totals_data.append(["IVA 21%: $", _fmt_num(resp.imp_iva)])
+
+        totals_data.append(["Importe Otros Tributos: $", _fmt_num(resp.imp_trib or Decimal("0.00"))])
+        totals_data.append(["Importe Total: $", _fmt_num(resp.monto)])
+    else:
+        totals_data = [
+            ["Subtotal: $", _fmt_num(subtotal_neto)],
+            ["Importe Otros Tributos: $", _fmt_num(resp.imp_trib or Decimal("0.00"))],
+            ["Importe Total: $", _fmt_num(resp.monto)],
+        ]
+
     t_tot = Table(totals_data, colWidths=[CONTENT_W * 0.82, CONTENT_W * 0.18])
     t_tot.setStyle(TableStyle([
         ("FONTNAME",      (0, 0), (-1, -2), "Helvetica"),

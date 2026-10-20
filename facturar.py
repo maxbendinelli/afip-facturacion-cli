@@ -219,7 +219,7 @@ def cmd_emitir(args) -> None:
         _output({
             "status": "dry-run-ok",
             "fields": {
-                "cbte_tipo": CBTE_TIPO["C"],
+                "cbte_tipo": CBTE_TIPO.get(getattr(args, "tipo", "C").upper(), 11),
                 "cuit_emisor": config.cuit,
                 "punto_venta": config.punto_venta,
                 "doc_tipo": doc_tipo,
@@ -250,7 +250,7 @@ def cmd_emitir(args) -> None:
     except Exception as e:
         _output({"error": f"Autenticación WSAA fallida: {e}"}, 1)
 
-    cbte_tipo = CBTE_TIPO["C"]
+    cbte_tipo = CBTE_TIPO.get(getattr(args, "tipo", "C").upper(), 11)
     try:
         ultimo = get_ultimo_numero(config, token, sign, cbte_tipo)
     except Exception as e:
@@ -302,8 +302,9 @@ def cmd_emitir(args) -> None:
 
 
 def cmd_nota(args, es_credito: bool) -> None:
-    tipo_key = "NC" if es_credito else "ND"
-    cbte_tipo = CBTE_TIPO[tipo_key]
+    letra = getattr(args, "tipo", "C").upper()
+    tipo_key = f"NC{letra}" if es_credito else f"ND{letra}"
+    cbte_tipo = CBTE_TIPO.get(tipo_key, CBTE_TIPO["NC" if es_credito else "ND"])
 
     try:
         config = load_config(args.env, args.dry_run)
@@ -355,7 +356,7 @@ def cmd_nota(args, es_credito: bool) -> None:
         doc_tipo=80,
         doc_nro=config.cuit,
         numero_original=args.numero_original,
-        cbte_tipo_original=CBTE_TIPO["C"],
+        cbte_tipo_original=CBTE_TIPO.get(getattr(args, "tipo", "C").upper(), 11),
     )
 
     try:
@@ -658,7 +659,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # --- emitir ---
     p_emit = sub.add_parser("emitir", help="Emitir Factura C")
-    p_emit.add_argument("--tipo", choices=["C"], default="C")
+    p_emit.add_argument("--tipo", choices=["A", "B", "C"], default="C", help="Tipo de factura: A, B o C (default: C)")
     p_emit.add_argument("--cuit-cliente", default="SIN_CUIT", metavar="CUIT|SIN_CUIT")
     p_emit.add_argument("--nombre-cliente", default=None, metavar="NOMBRE",
                         help="Opcional: se resuelve automáticamente por padrón A13 si se pasa CUIT")
@@ -698,14 +699,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_val.add_argument("--env", choices=["homo", "prod"], default="prod")
 
     # --- nota-credito ---
-    p_nc = sub.add_parser("nota-credito", help="Emitir Nota de Crédito C (tipo 13)")
+    p_nc = sub.add_parser("nota-credito", help="Emitir Nota de Crédito (A, B o C)")
+    p_nc.add_argument("--tipo", choices=["A", "B", "C"], default="C", help="Tipo: A, B o C")
     p_nc.add_argument("--numero-original", required=True, type=int, metavar="N")
     p_nc.add_argument("--monto", required=True, type=float, metavar="IMPORTE")
     p_nc.add_argument("--env", choices=["homo", "prod"], default="homo")
     p_nc.add_argument("--dry-run", action="store_true")
 
     # --- nota-debito ---
-    p_nd = sub.add_parser("nota-debito", help="Emitir Nota de Débito C (tipo 12)")
+    p_nd = sub.add_parser("nota-debito", help="Emitir Nota de Débito (A, B o C)")
+    p_nd.add_argument("--tipo", choices=["A", "B", "C"], default="C", help="Tipo: A, B o C")
     p_nd.add_argument("--numero-original", required=True, type=int, metavar="N")
     p_nd.add_argument("--monto", required=True, type=float, metavar="IMPORTE")
     p_nd.add_argument("--env", choices=["homo", "prod"], default="homo")
@@ -713,12 +716,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     # --- ultimo-numero ---
     p_un = sub.add_parser("ultimo-numero", help="Consultar el último número emitido")
-    p_un.add_argument("--tipo", choices=["C", "NC", "ND"], required=True)
+    p_un.add_argument("--tipo", choices=["A", "B", "C", "NCA", "NCB", "NCC", "NDA", "NDB", "NDC", "NC", "ND"], required=True)
     p_un.add_argument("--env", choices=["homo", "prod"], default="homo")
 
     # --- buscar ---
     p_bus = sub.add_parser("buscar", help="Buscar comprobantes en AFIP por fecha y/o receptor")
-    p_bus.add_argument("--tipo", choices=["C", "NC", "ND"], default="C")
+    p_bus.add_argument("--tipo", choices=["A", "B", "C", "NCA", "NCB", "NCC", "NDA", "NDB", "NDC", "NC", "ND"], default="C")
     p_bus.add_argument("--desde-fecha", metavar="YYYYMMDD")
     p_bus.add_argument("--hasta-fecha", metavar="YYYYMMDD")
     p_bus.add_argument("--receptor", metavar="CUIT|DNI", help="CUIT o DNI del receptor")
@@ -731,7 +734,7 @@ def build_parser() -> argparse.ArgumentParser:
     # --- consultar ---
     p_con = sub.add_parser("consultar", help="Consultar comprobante en AFIP y opcionalmente generar PDF")
     p_con.add_argument("--numero", required=True, type=int, metavar="N")
-    p_con.add_argument("--tipo", choices=["C", "NC", "ND"], default="C")
+    p_con.add_argument("--tipo", choices=["A", "B", "C", "NCA", "NCB", "NCC", "NDA", "NDB", "NDC", "NC", "ND"], default="C")
     p_con.add_argument("--pdf", action="store_true", help="Generar PDF con los datos obtenidos de AFIP")
     p_con.add_argument("--duplicado", action="store_true")
     p_con.add_argument("--output", metavar="ARCHIVO.pdf")

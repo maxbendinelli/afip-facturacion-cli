@@ -49,3 +49,11 @@ ENV/
 # Windows artifacts
 *:Zone.Identifier
 *.lnk
+
+# Comprobantes y Lotes generados
+comprobantes/*
+!comprobantes/.gitkeep
+
+# Uploads locales (logos, marcas de agua)
+static/uploads/*
+!static/uploads/.gitkeep

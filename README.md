@@ -16,6 +16,32 @@ CLI en Python para facturación electrónica argentina a través de los servicio
 - ✅ Output en **JSON** — fácil de integrar con otros scripts o sistemas
 - ✅ Helper para generar **clave RSA + CSR** para registrar en AFIP
 
+
+## 🖥️ Interfaz Gráfica Web (GUI)
+
+El proyecto incluye un dashboard web interactivo con diseño moderno, visor de PDF e impresión directa:
+
+```bash
+# En Linux / WSL:
+python3 run_gui.py
+# o bien:
+./run_gui.sh
+
+# En Windows:
+run_gui.bat
+```
+
+Se abrirá automáticamente en tu navegador en `http://localhost:8000`:
+- **Emisión:** Emisión interactiva de Facturas A, B y C, Notas de Crédito y Débito con cálculo de IVA en tiempo real y soporte completo para las 11 condiciones oficiales de IVA ante AFIP (RG 5616).
+- **Facturación por Lotes (CSV):** Carga masiva con plantilla modelo descargable, tabla interactiva de previsualización antes de emitir, simulación local (dry-run), pruebas en homologación y descarga de todas las facturas en archivo ZIP.
+- **Personalización de Facturas PDF:** Carga de logotipo comercial, leyendas y datos bancarios (CBU/Alias) y marcas de agua personalizadas (texto o imagen) con botón de previsualización en vivo.
+- **Selector y Subida de Certificados:** Explorador visual de archivos `.crt` y `.key`, detección automática en carpetas y subida directa desde el navegador.
+- **Padrón A13:** Autocompletado de Razón Social y Domicilio al ingresar el CUIT.
+- **Visor & Impresión:** Vista previa embebida del PDF con botón de impresión directa a tu impresora predeterminada.
+- **Historial:** Búsqueda, consulta y reimpresión de comprobantes emitidos.
+- **Configuración:** Ajuste de variables `.env`, certificados, punto de venta y test de conexión en vivo con AFIP.
+- **Asistente:** Generación de clave RSA y CSR para dar de alta en AFIP.
+
 ## Requisitos
 
 - Python 3.11+

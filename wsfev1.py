@@ -1,9 +1,11 @@
+from collections import defaultdict
 from decimal import Decimal
+from typing import Optional
 
 import zeep
 
 from config import Config
-from models import InvoiceRequest, InvoiceResponse
+from models import InvoiceItem, InvoiceRequest, InvoiceResponse
 from ssl_transport import build_transport
 
 
@@ -30,6 +32,48 @@ def get_ultimo_numero(config: Config, token: str, sign: str, cbte_tipo: int) -> 
 def solicitar_cae(config: Config, token: str, sign: str, req: InvoiceRequest) -> InvoiceResponse:
     client = _build_client(config)
 
+    # Comprobantes tipo A (1, 2, 3, 4) y B (6, 7, 8, 9) discriminan/calculan IVA
+    is_iva_discriminated = req.cbte_tipo in (1, 2, 3, 4, 6, 7, 8, 9)
+
+    imp_neto = req.imp_neto
+    imp_iva = req.imp_iva
+    ivas = list(req.ivas) if req.ivas else []
+
+    if is_iva_discriminated:
+        if imp_neto is None or imp_iva is None:
+            if req.items:
+                alics = defaultdict(lambda: {"base": Decimal("0.00"), "iva": Decimal("0.00")})
+                for it in req.items:
+                    alic_id = getattr(it, "alicuota_iva_id", 5)
+                    alics[alic_id]["base"] += it.subtotal
+                    alics[alic_id]["iva"] += it.iva_monto
+                imp_neto = sum(d["base"] for d in alics.values())
+                imp_iva = sum(d["iva"] for d in alics.values())
+                ivas = [
+                    {
+                        "Id": alic_id,
+                        "BaseImp": str(data["base"]),
+                        "Importe": str(data["iva"]),
+                    }
+                    for alic_id, data in alics.items()
+                    if alic_id != 3 and data["iva"] > 0
+                ]
+            else:
+                imp_neto = (req.monto / Decimal("1.21")).quantize(Decimal("0.01"))
+                imp_iva = (req.monto - imp_neto).quantize(Decimal("0.01"))
+                ivas = [{
+                    "Id": 5,
+                    "BaseImp": str(imp_neto),
+                    "Importe": str(imp_iva),
+                }]
+        imp_total = imp_neto + imp_iva + req.imp_trib + req.imp_op_ex + req.imp_tot_conc
+    else:
+        # Factura C
+        imp_total = req.monto
+        imp_neto = req.monto
+        imp_iva = Decimal("0.00")
+        ivas = []
+
     det = {
         "Concepto": req.concepto_afip,
         "DocTipo": req.doc_tipo,
@@ -37,16 +81,19 @@ def solicitar_cae(config: Config, token: str, sign: str, req: InvoiceRequest) ->
         "CbteDesde": req.numero,
         "CbteHasta": req.numero,
         "CbteFch": req.fecha,
-        "ImpTotal": str(req.monto),
-        "ImpTotConc": "0.00",
-        "ImpNeto": str(req.monto),
-        "ImpOpEx": "0.00",
-        "ImpIVA": "0.00",
-        "ImpTrib": "0.00",
+        "ImpTotal": str(imp_total),
+        "ImpTotConc": str(req.imp_tot_conc),
+        "ImpNeto": str(imp_neto),
+        "ImpOpEx": str(req.imp_op_ex),
+        "ImpIVA": str(imp_iva),
+        "ImpTrib": str(req.imp_trib),
         "MonId": "PES",
         "MonCotiz": "1",
         "CondicionIVAReceptorId": req.condicion_iva_receptor,
     }
+
+    if is_iva_discriminated and ivas:
+        det["Iva"] = {"AlicIva": ivas}
 
     # Servicios (concepto 2 o 3) requieren fechas de período
     if req.concepto_afip in (2, 3):
@@ -58,7 +105,7 @@ def solicitar_cae(config: Config, token: str, sign: str, req: InvoiceRequest) ->
     if req.numero_original is not None:
         det["CbtesAsoc"] = {
             "CbteAsoc": [{
-                "Tipo": req.cbte_tipo_original,
+                "Tipo": req.cbte_tipo_original or req.cbte_tipo,
                 "PtoVta": config.punto_venta,
                 "Nro": req.numero_original,
                 "Cuit": config.cuit,
@@ -98,7 +145,7 @@ def solicitar_cae(config: Config, token: str, sign: str, req: InvoiceRequest) ->
         cbte_tipo=req.cbte_tipo,
         punto_venta=config.punto_venta,
         fecha=det_resp.CbteFch,
-        monto=req.monto,
+        monto=imp_total,
         nombre_cliente=req.nombre_cliente,
         cuit_cliente=req.cuit_cliente,
         resultado=det_resp.Resultado,
@@ -110,6 +157,11 @@ def solicitar_cae(config: Config, token: str, sign: str, req: InvoiceRequest) ->
         periodo_hasta=req.periodo_hasta,
         items=req.items,
         observaciones=observaciones,
+        imp_neto=imp_neto,
+        imp_iva=imp_iva,
+        imp_trib=req.imp_trib,
+        imp_op_ex=req.imp_op_ex,
+        ivas=ivas,
     )
 
 
@@ -142,6 +194,14 @@ def consultar_comprobante(config: Config, token: str, sign: str, cbte_tipo: int,
         "condicion_iva_receptor": int(r.CondicionIVAReceptorId or 5),
         "resultado": r.Resultado,
     }
+    if hasattr(r, "ImpNeto") and r.ImpNeto is not None:
+        data["imp_neto"] = str(Decimal(str(r.ImpNeto)).quantize(Decimal("0.01")))
+    if hasattr(r, "ImpIVA") and r.ImpIVA is not None:
+        data["imp_iva"] = str(Decimal(str(r.ImpIVA)).quantize(Decimal("0.01")))
+    if hasattr(r, "ImpTrib") and r.ImpTrib is not None:
+        data["imp_trib"] = str(Decimal(str(r.ImpTrib)).quantize(Decimal("0.01")))
+    if hasattr(r, "ImpOpEx") and r.ImpOpEx is not None:
+        data["imp_op_ex"] = str(Decimal(str(r.ImpOpEx)).quantize(Decimal("0.01")))
     if hora:
         data["hora"] = hora
     if r.FchServDesde:
@@ -170,12 +230,9 @@ def buscar_rango(
     receptor_norm = receptor.strip().replace("-", "").replace(" ", "") if receptor else None
 
     results = []
-    total = hasta_numero - desde_numero + 1
     client = _build_client(config)
 
-    for i, nro in enumerate(range(desde_numero, hasta_numero + 1), 1):
-        sys.stderr.write(f"\rConsultando {nro}/{hasta_numero} ({i}/{total})...    ")
-        sys.stderr.flush()
+    for nro in range(desde_numero, hasta_numero + 1):
         try:
             resp = client.service.FECompConsultar(
                 Auth=_auth(config, token, sign),
@@ -183,7 +240,7 @@ def buscar_rango(
             )
             _check_errors(resp)
             r = resp.ResultGet
-        except RuntimeError:
+        except (RuntimeError, Exception):
             continue
 
         fecha = r.CbteFch or ""
@@ -198,6 +255,8 @@ def buscar_rango(
 
         entry = {
             "numero": int(r.CbteDesde),
+            "cbte_tipo": int(r.CbteTipo),
+            "punto_venta": int(r.PtoVta),
             "comprobante": f"{int(r.PtoVta):04d}-{int(r.CbteDesde):08d}",
             "fecha": fecha,
             "monto": str(Decimal(str(r.ImpTotal)).quantize(Decimal("0.01"))),
@@ -206,13 +265,16 @@ def buscar_rango(
             "doc_tipo": int(r.DocTipo),
             "doc_nro": doc_nro,
         }
+        if hasattr(r, "ImpNeto") and r.ImpNeto is not None:
+            entry["imp_neto"] = str(Decimal(str(r.ImpNeto)).quantize(Decimal("0.01")))
+        if hasattr(r, "ImpIVA") and r.ImpIVA is not None:
+            entry["imp_iva"] = str(Decimal(str(r.ImpIVA)).quantize(Decimal("0.01")))
         if r.FchServDesde:
             entry["periodo_desde"] = r.FchServDesde
         if r.FchServHasta:
             entry["periodo_hasta"] = r.FchServHasta
         results.append(entry)
 
-    sys.stderr.write("\n")
     return results
 
 

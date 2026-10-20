@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ARCA / AFIP - Facturación Electrónica</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="dark-theme">
+  <!-- Top Navigation Header -->
+  <header class="app-header">
+    <div class="header-brand">
+      <div class="brand-logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+          <polyline points="10 9 9 9 8 9"></polyline>
+        </svg>
+      </div>
+      <div class="brand-info">
+        <h1>ARCA / AFIP Facturación</h1>
+        <span class="brand-sub" id="header-emisor-summary">Cargando emisor...</span>
+      </div>
+    </div>
+
+    <div class="header-badges">
+      <div class="badge badge-pv" id="badge-punto-venta">PV: --</div>
+      <button class="env-toggle-pill" id="btn-toggle-env-header" title="Click para alternar entre Homologación y Producción">
+        <span class="status-dot" id="env-dot"></span>
+        <span id="env-label">HOMO</span>
+      </button>
+      <button class="btn-icon" id="btn-quick-test" title="Probar conexión con AFIP">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <div class="app-layout">
+    <!-- Tabs Navigation -->
+    <nav class="nav-tabs">
+      <button class="tab-btn active" data-tab="tab-emitir">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+        Emitir Comprobante
+      </button>
+      <button class="tab-btn" data-tab="tab-lotes">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>
+        Facturación por Lotes (CSV)
+      </button>
+      <button class="tab-btn" data-tab="tab-historial">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+        Historial & Búsqueda
+      </button>
+      <button class="tab-btn" data-tab="tab-config">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        Configuración & Diseño
+      </button>
+      <button class="tab-btn" data-tab="tab-csr">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+        Clave RSA & CSR
+      </button>
+    </nav>
+
+    <!-- TAB 1: EMITIR COMPROBANTE -->
+    <main class="tab-content active" id="tab-emitir">
+      <div class="emitir-grid">
+        <div class="emitir-form-col">
+          <!-- Card: Tipo de Comprobante -->
+          <div class="card">
+            <div class="card-header">
+              <span class="step-num">1</span>
+              <h2>Tipo de Comprobante</h2>
+            </div>
+            <div class="card-body">
+              <div class="cbte-selector-pills">
+                <button type="button" class="cbte-pill active" data-tipo="11" data-letra="C">
+                  <span class="pill-letter">C</span>
+                  <div class="pill-text">
+                    <strong>Factura C</strong>
+                    <small>Monotributo / Exento</small>
+                  </div>
+                </button>
+                <button type="button" class="cbte-pill" data-tipo="6" data-letra="B">
+                  <span class="pill-letter letter-b">B</span>
+                  <div class="pill-text">
+                    <strong>Factura B</strong>
+                    <small>A Consumidor Final</small>
+                  </div>
+                </button>
+                <button type="button" class="cbte-pill" data-tipo="1" data-letra="A">
+                  <span class="pill-letter letter-a">A</span>
+                  <div class="pill-text">
+                    <strong>Factura A</strong>
+                    <small>A Resp. Inscripto</small>
+                  </div>
+                </button>
+                <button type="button" class="cbte-pill" data-tipo="13" data-letra="C">
+                  <span class="pill-letter letter-nc">NC</span>
+                  <div class="pill-text">
+                    <strong>Nota de Crédito</strong>
+                    <small>Anulación / Devolución</small>
+                  </div>
+                </button>
+                <button type="button" class="cbte-pill" data-tipo="12" data-letra="C">
+                  <span class="pill-letter letter-nd">ND</span>
+                  <div class="pill-text">
+                    <strong>Nota de Débito</strong>
+                    <small>Ajuste deudor</small>
+                  </div>
+                </button>
+              </div>
+
+              <!-- Sub-selector de letra para NC / ND -->
+              <div class="nc-subletter-row hidden" id="nc-subletter-box">
+                <label>Letra del Comprobante:</label>
+                <div class="subletter-radios">
+                  <label><input type="radio" name="subletter" value="C" checked> Letra C</label>
+                  <label><input type="radio" name="subletter" value="B"> Letra B</label>
+                  <label><input type="radio" name="subletter" value="A"> Letra A</label>
+                </div>
+              </div>
+
+              <!-- Banner informativo dinámico -->
+              <div class="info-banner" id="cbte-info-banner">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                <span id="cbte-info-text">Emitiendo Factura C estándar sin discriminación de IVA.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card: Datos del Receptor -->
+          <div class="card">
+            <div class="card-header">
+              <span class="step-num">2</span>
+              <h2>Datos del Receptor</h2>
+            </div>
+            <div class="card-body">
+              <div class="form-row form-row-3">
+                <div class="form-group">
+                  <label for="receptor-doc-tipo">Tipo de Documento</label>
+                  <select id="receptor-doc-tipo">
+                    <option value="99">Sin Documento (Consumidor Final)</option>
+                    <option value="80" selected>CUIT (Empresa o Persona)</option>
+                    <option value="96">DNI (Persona Física)</option>
+                  </select>
+                </div>
+                <div class="form-group col-span-2">
+                  <label for="receptor-doc-nro">Número de CUIT / DNI</label>
+                  <div class="input-with-button">
+                    <input type="text" id="receptor-doc-nro" placeholder="Ej: 20-12345678-9 o 30-71234567-8" autocomplete="off">
+                    <button type="button" class="btn btn-secondary" id="btn-buscar-padron">
+                      <span class="spinner hidden" id="padron-spinner"></span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                      Buscar Padrón
+                    </button>
+                  </div>
+                  <span class="input-hint" id="padron-feedback"></span>
+                </div>
+              </div>
+
+              <div class="form-row form-row-2">
+                <div class="form-group">
+                  <label for="receptor-nombre">Apellido y Nombre / Razón Social <span class="required">*</span></label>
+                  <input type="text" id="receptor-nombre" placeholder="Nombre completo o Razón Social">
+                </div>
+                <div class="form-group">
+                  <label for="receptor-cond-iva">Condición frente al IVA</label>
+                  <select id="receptor-cond-iva">
+                    <option value="">seleccionar...</option>
+                    <option value="1">IVA Responsable Inscripto</option>
+                    <option value="4">IVA Sujeto Exento</option>
+                    <option value="5" selected>Consumidor Final</option>
+                    <option value="6">Responsable Monotributo</option>
+                    <option value="7">Sujeto No Categorizado</option>
+                    <option value="8">Proveedor del Exterior</option>
+                    <option value="9">Cliente del Exterior</option>
+                    <option value="10">IVA Liberado - Ley Nº 19.640</option>
+                    <option value="13">Monotributista Social</option>
+                    <option value="15">IVA No Alcanzado</option>
+                    <option value="16">Monotributista Trabajador Independiente Promovido</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="receptor-domicilio">Domicilio Comercial / Fiscal (Opcional)</label>
+                  <input type="text" id="receptor-domicilio" placeholder="Av. Corrientes 1234, CABA">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card: Datos de la Operación -->
+          <div class="card">
+            <div class="card-header">
+              <span class="step-num">3</span>
+              <h2>Datos de la Operación</h2>
+            </div>
+            <div class="card-body">
+              <div class="form-row form-row-3">
+                <div class="form-group">
+                  <label for="op-concepto">Concepto AFIP</label>
+                  <select id="op-concepto">
+                    <option value="2" selected>2 - Servicios</option>
+                    <option value="1">1 - Productos / Bienes</option>
+                    <option value="3">3 - Productos y Servicios</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="op-cond-venta">Condición de Venta</label>
+                  <select id="op-cond-venta">
+                    <option value="Contado" selected>Contado</option>
+                    <option value="Cuenta Corriente">Cuenta Corriente</option>
+                    <option value="Tarjeta de Débito">Tarjeta de Débito</option>
+                    <option value="Tarjeta de Crédito">Tarjeta de Crédito</option>
+                    <option value="Transferencia">Transferencia Bancaria</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="op-fecha">Fecha de Emisión</label>
+                  <input type="date" id="op-fecha">
+                </div>
+              </div>
+
+              <div class="form-row form-row-3" id="fechas-servicio-box">
+                <div class="form-group">
+                  <label for="op-serv-desde">Período Desde</label>
+                  <input type="date" id="op-serv-desde">
+                </div>
+                <div class="form-group">
+                  <label for="op-serv-hasta">Período Hasta</label>
+                  <input type="date" id="op-serv-hasta">
+                </div>
+                <div class="form-group">
+                  <label for="op-vto-pago">Vencimiento para el Pago</label>
+                  <input type="date" id="op-vto-pago">
+                </div>
+              </div>
+
+              <div class="form-row form-row-2 hidden" id="asociado-box">
+                <div class="form-group">
+                  <label for="op-cbte-asoc-nro">N° Comprobante Asociado <span class="required">*</span></label>
+                  <input type="number" id="op-cbte-asoc-nro" placeholder="Ej: 25">
+                </div>
+                <div class="form-group">
+                  <label for="op-cbte-asoc-tipo">Tipo Comprobante Asociado</label>
+                  <select id="op-cbte-asoc-tipo">
+                    <option value="11">Factura C</option>
+                    <option value="6">Factura B</option>
+                    <option value="1">Factura A</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card: Detalle de Ítems -->
+          <div class="card">
+            <div class="card-header header-with-action">
+              <div class="header-left">
+                <span class="step-num">4</span>
+                <h2>Detalle de Ítems</h2>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-add-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                Agregar Ítem
+              </button>
+            </div>
+            <div class="card-body">
+              <div class="items-table-container">
+                <table class="items-table" id="items-table">
+                  <thead>
+                    <tr>
+                      <th class="th-desc">Descripción</th>
+                      <th class="th-qty">Cant.</th>
+                      <th class="th-price">Precio Unit. ($)</th>
+                      <th class="th-iva" id="th-iva-col">Alícuota IVA</th>
+                      <th class="th-subtotal">Subtotal ($)</th>
+                      <th class="th-actions"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="items-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Columna Derecha: Totales y Botón Emitir -->
+        <div class="emitir-summary-col">
+          <div class="card summary-card">
+            <div class="card-header">
+              <h2>Resumen de Facturación</h2>
+            </div>
+            <div class="card-body">
+              <div class="summary-line">
+                <span>Subtotal Neto:</span>
+                <strong id="summary-subtotal">$ 0,00</strong>
+              </div>
+              <div class="summary-line" id="summary-iva-row">
+                <span>IVA Total:</span>
+                <strong id="summary-iva">$ 0,00</strong>
+              </div>
+              <div class="summary-breakdown" id="summary-iva-breakdown"></div>
+              <div class="summary-divider"></div>
+              <div class="summary-total">
+                <span class="total-label">TOTAL A PAGAR:</span>
+                <span class="total-amount" id="summary-total">$ 0,00</span>
+              </div>
+
+              <div class="summary-options">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="chk-duplicado">
+                  <span>Generar Duplicado en el PDF</span>
+                </label>
+                <label class="checkbox-label">
+                  <input type="checkbox" id="chk-dry-run">
+                  <span>Modo Simulación (Dry-Run sin AFIP)</span>
+                </label>
+              </div>
+
+              <button type="button" class="btn btn-primary btn-emitir" id="btn-emitir-factura">
+                <span class="spinner hidden" id="emitir-spinner"></span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                Emitir a AFIP
+              </button>
+
+              <div class="summary-footer-note">
+                <small id="summary-pv-info">Se emitirá en Punto de Venta <strong id="summary-pv">0004</strong> (Entorno <strong id="summary-env">HOMO</strong>)</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- TAB 2: FACTURACIÓN POR LOTES (CSV) -->
+    <main class="tab-content" id="tab-lotes">
+      <div class="lotes-layout">
+        <!-- Subir CSV y Controles -->
+        <div class="card">
+          <div class="card-header header-with-action">
+            <div class="header-left">
+              <h2>Importar Lote desde CSV</h2>
+            </div>
+            <a href="/api/lotes/template-csv" class="btn btn-secondary btn-sm" id="btn-download-template" download>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              Descargar Plantilla CSV
+            </a>
+          </div>
+          <div class="card-body">
+            <div class="dropzone-box" id="csv-dropzone">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+              <h3>Arrastrá tu archivo CSV acá o hacé clic para seleccionar</h3>
+              <p>Soporta columnas: <code>tipo</code> (A, B, C), <code>cuit_cliente</code>, <code>nombre_cliente</code>, <code>concepto</code>, <code>monto</code>, <code>alicuota_iva</code>.</p>
+              <input type="file" id="csv-file-input" accept=".csv,text/csv,text/plain" class="hidden">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-select-csv">Elegir Archivo CSV</button>
+            </div>
+
+            <!-- Resumen de interpretación de Lote -->
+            <div class="lote-stats-bar hidden" id="lote-stats-bar">
+              <div class="lote-stat-item">
+                <span class="stat-label">Comprobantes:</span>
+                <strong class="stat-value" id="stat-total-cbtes">0</strong>
+              </div>
+              <div class="lote-stat-item">
+                <span class="stat-label">Importe Total:</span>
+                <strong class="stat-value font-mono" id="stat-total-monto">$ 0,00</strong>
+              </div>
+              <div class="lote-stat-item">
+                <span class="stat-label">Válidos:</span>
+                <strong class="stat-value text-emerald" id="stat-validos">0</strong>
+              </div>
+              <div class="lote-stat-item">
+                <span class="stat-label">Errores:</span>
+                <strong class="stat-value text-rose" id="stat-errores">0</strong>
+              </div>
+              <div class="lote-stat-item">
+                <span class="stat-label">Tipos:</span>
+                <span id="stat-tipos-pills"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tabla de Preview del Lote -->
+        <div class="card hidden" id="card-lote-preview">
+          <div class="card-header header-with-action">
+            <div class="header-left">
+              <h2>Vista Previa del Lote Interpretado</h2>
+            </div>
+            <div class="header-actions-flex">
+              <label class="checkbox-label">
+                <input type="checkbox" id="chk-lote-dryrun" checked>
+                <span>Modo Simulación (Dry-Run de prueba)</span>
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="chk-lote-duplicado">
+                <span>Generar Duplicados</span>
+              </label>
+              <button type="button" class="btn btn-primary" id="btn-emitir-lote">
+                <span class="spinner hidden" id="lote-spinner"></span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                Emitir Lote a AFIP
+              </button>
+            </div>
+          </div>
+          <div class="card-body">
+            <!-- Barra de Progreso durante emisión -->
+            <div class="progress-container hidden" id="lote-progress-box">
+              <div class="progress-label-row">
+                <span id="lote-progress-text">Procesando comprobantes...</span>
+                <span id="lote-progress-percent">0%</span>
+              </div>
+              <div class="progress-bar">
+                <div class="progress-fill" id="lote-progress-fill" style="width: 0%;"></div>
+              </div>
+            </div>
+
+            <div class="table-responsive">
+              <table class="data-table" id="table-lote-preview">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Tipo</th>
+                    <th>Documento</th>
+                    <th>Receptor</th>
+                    <th>Concepto</th>
+                    <th>Neto</th>
+                    <th>IVA</th>
+                    <th>Total</th>
+                    <th>Estado / Diagnóstico</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-lote-preview"></tbody>
+              </table>
+            </div>
+
+            <!-- Botón descargar ZIP al finalizar -->
+            <div class="lote-final-actions hidden" id="lote-final-actions">
+              <a href="#" class="btn btn-primary" id="btn-download-lote-zip">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                Descargar Todos los PDFs del Lote (.ZIP)
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- TAB 3: HISTORIAL Y BÚSQUEDA -->
+    <main class="tab-content" id="tab-historial">
+      <div class="historial-layout">
+        <div class="card card-toolbar">
+          <div class="toolbar-flex">
+            <div class="search-input-box">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              <input type="text" id="historial-search" placeholder="Buscar por número, cliente o CUIT...">
+            </div>
+            <div class="toolbar-actions">
+              <button type="button" class="btn btn-secondary" id="btn-refresh-historial">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                Actualizar
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h2>Comprobantes Locales Emitidos</h2>
+          </div>
+          <div class="card-body">
+            <div class="table-responsive">
+              <table class="data-table" id="historial-table">
+                <thead>
+                  <tr>
+                    <th>Comprobante</th>
+                    <th>Tipo</th>
+                    <th>Fecha</th>
+                    <th>Receptor</th>
+                    <th>Monto</th>
+                    <th>CAE</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="historial-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h2>Consultar Comprobante Directo en AFIP</h2>
+          </div>
+          <div class="card-body">
+            <div class="form-row form-row-4">
+              <div class="form-group">
+                <label for="consultar-tipo">Tipo Comprobante</label>
+                <select id="consultar-tipo">
+                  <option value="11">Factura C</option>
+                  <option value="6">Factura B</option>
+                  <option value="1">Factura A</option>
+                  <option value="13">Nota de Crédito C</option>
+                  <option value="8">Nota de Crédito B</option>
+                  <option value="3">Nota de Crédito A</option>
+                  <option value="12">Nota de Débito C</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="consultar-numero">Número de Comprobante</label>
+                <input type="number" id="consultar-numero" placeholder="Ej: 26">
+              </div>
+              <div class="form-group">
+                <label>&nbsp;</label>
+                <button type="button" class="btn btn-secondary w-full" id="btn-consultar-afip">
+                  Consultar AFIP
+                </button>
+              </div>
+              <div class="form-group">
+                <label>&nbsp;</label>
+                <button type="button" class="btn btn-primary w-full" id="btn-reimprimir-afip">
+                  Reimprimir PDF
+                </button>
+              </div>
+            </div>
+            <div id="consulta-afip-result" class="consulta-result-box hidden"></div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- TAB 4: CONFIGURACIÓN & DISEÑO -->
+    <main class="tab-content" id="tab-config">
+      <div class="config-grid">
+        <div class="card">
+          <div class="card-header">
+            <h2>Configuración del Emisor y Certificados</h2>
+          </div>
+          <div class="card-body">
+            <form id="form-config">
+              <!-- Entorno y Punto de Venta -->
+              <div class="form-row form-row-2">
+                <div class="form-group">
+                  <label for="cfg-env">Entorno Activo</label>
+                  <select id="cfg-env">
+                    <option value="homo">Homologación (Servidor de pruebas AFIP)</option>
+                    <option value="prod">Producción (ARCA/AFIP Real y Legal)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="cfg-punto-venta">Punto de Venta Autorizado</label>
+                  <input type="number" id="cfg-punto-venta" required>
+                </div>
+              </div>
+
+              <!-- Datos Fiscales del Emisor -->
+              <div class="form-row form-row-2">
+                <div class="form-group">
+                  <label for="cfg-cuit">CUIT Emisor (11 dígitos)</label>
+                  <input type="text" id="cfg-cuit" required>
+                </div>
+                <div class="form-group">
+                  <label for="cfg-razon-social">Apellido y Nombre / Razón Social</label>
+                  <input type="text" id="cfg-razon-social" required>
+                </div>
+              </div>
+
+              <div class="form-row form-row-2">
+                <div class="form-group">
+                  <label for="cfg-nombre-fantasia">Nombre de Fantasía (Opcional)</label>
+                  <input type="text" id="cfg-nombre-fantasia">
+                </div>
+                <div class="form-group">
+                  <label for="cfg-cond-iva-emisor">Condición IVA Emisor</label>
+                  <select id="cfg-cond-iva-emisor">
+                    <option value="Responsable Monotributo">Responsable Monotributo</option>
+                    <option value="IVA Responsable Inscripto">IVA Responsable Inscripto</option>
+                    <option value="IVA Sujeto Exento">IVA Sujeto Exento</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="cfg-domicilio">Domicilio Comercial (para cabecera de PDF)</label>
+                  <input type="text" id="cfg-domicilio">
+                </div>
+              </div>
+
+              <div class="form-row form-row-3">
+                <div class="form-group">
+                  <label for="cfg-ingresos-brutos">Ingresos Brutos (N° o EXENTO)</label>
+                  <input type="text" id="cfg-ingresos-brutos">
+                </div>
+                <div class="form-group">
+                  <label for="cfg-inicio-actividades">Inicio de Actividades (DD/MM/AAAA)</label>
+                  <input type="text" id="cfg-inicio-actividades">
+                </div>
+                <div class="form-group">
+                  <label for="cfg-limite-cf">Límite Consumidor Final ($)</label>
+                  <input type="number" step="0.01" id="cfg-limite-cf">
+                </div>
+              </div>
+
+              <!-- CERTIFICADOS DIGITALES CON SELECTOR Y SUBIDA -->
+              <div class="section-divider">Certificados Digitales (Selector de Archivos)</div>
+
+              <!-- Certificados Homologación -->
+              <div class="cert-block">
+                <h3>Ambiente de Homologación (Testing)</h3>
+                <div class="form-row form-row-2">
+                  <div class="form-group">
+                    <div class="cert-label-flex">
+                      <label>Certificado (.crt / .pem)</label>
+                      <span class="badge" id="badge-cert-homo">--</span>
+                    </div>
+                    <div class="file-picker-row">
+                      <select class="cert-dropdown" id="select-cert-homo"></select>
+                      <button type="button" class="btn btn-secondary btn-sm btn-upload-trigger" data-target="cfg-cert-homo" data-env="homo">📁 Examinar...</button>
+                    </div>
+                    <input type="text" id="cfg-cert-homo" class="input-subtle" placeholder="Ruta del archivo">
+                  </div>
+                  <div class="form-group">
+                    <div class="cert-label-flex">
+                      <label>Clave Privada (.key)</label>
+                      <span class="badge" id="badge-key-homo">--</span>
+                    </div>
+                    <div class="file-picker-row">
+                      <select class="cert-dropdown" id="select-key-homo"></select>
+                      <button type="button" class="btn btn-secondary btn-sm btn-upload-trigger" data-target="cfg-key-homo" data-env="homo">📁 Examinar...</button>
+                    </div>
+                    <input type="text" id="cfg-key-homo" class="input-subtle" placeholder="Ruta del archivo">
+                  </div>
+                </div>
+              </div>
+
+              <!-- Certificados Producción -->
+              <div class="cert-block">
+                <h3>Ambiente de Producción (Real)</h3>
+                <div class="form-row form-row-2">
+                  <div class="form-group">
+                    <div class="cert-label-flex">
+                      <label>Certificado (.crt / .pem)</label>
+                      <span class="badge" id="badge-cert-prod">--</span>
+                    </div>
+                    <div class="file-picker-row">
+                      <select class="cert-dropdown" id="select-cert-prod"></select>
+                      <button type="button" class="btn btn-secondary btn-sm btn-upload-trigger" data-target="cfg-cert-prod" data-env="prod">📁 Examinar...</button>
+                    </div>
+                    <input type="text" id="cfg-cert-prod" class="input-subtle" placeholder="Ruta del archivo">
+                  </div>
+                  <div class="form-group">
+                    <div class="cert-label-flex">
+                      <label>Clave Privada (.key)</label>
+                      <span class="badge" id="badge-key-prod">--</span>
+                    </div>
+                    <div class="file-picker-row">
+                      <select class="cert-dropdown" id="select-key-prod"></select>
+                      <button type="button" class="btn btn-secondary btn-sm btn-upload-trigger" data-target="cfg-key-prod" data-env="prod">📁 Examinar...</button>
+                    </div>
+                    <input type="text" id="cfg-key-prod" class="input-subtle" placeholder="Ruta del archivo">
+                  </div>
+                </div>
+              </div>
+
+              <!-- Input invisible para subir certs -->
+              <input type="file" id="cert-file-uploader" class="hidden">
+
+              <!-- SECCIÓN DE PERSONALIZACIÓN DEL PDF -->
+              <div class="section-divider">Personalización y Diseño de Facturas (PDF)</div>
+
+              <div class="custom-design-box">
+                <!-- Logo -->
+                <div class="form-row form-row-2">
+                  <div class="form-group">
+                    <label>Logo de la Empresa (Cabecera)</label>
+                    <div class="file-picker-row">
+                      <input type="text" id="cfg-logo-path" placeholder="./static/uploads/logo.png">
+                      <button type="button" class="btn btn-secondary btn-sm" id="btn-upload-logo">📁 Subir Logo</button>
+                    </div>
+                    <input type="file" id="logo-file-input" accept="image/png,image/jpeg" class="hidden">
+                  </div>
+                  <div class="form-group">
+                    <label>Vista previa del Logo:</label>
+                    <div class="logo-preview-box" id="logo-preview-box">
+                      <span class="text-dim">Sin logo cargado</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Watermark -->
+                <div class="form-row form-row-2">
+                  <div class="form-group">
+                    <label for="cfg-watermark-text">Texto de Marca de Agua (Fondo)</label>
+                    <input type="text" id="cfg-watermark-text" placeholder="Ej: ORIGINAL, PAGADO o DUPLICADO">
+                  </div>
+                  <div class="form-group">
+                    <label for="cfg-watermark-image">Imagen de Marca de Agua (Opcional)</label>
+                    <div class="file-picker-row">
+                      <input type="text" id="cfg-watermark-image" placeholder="Ruta a imagen transparente">
+                      <button type="button" class="btn btn-secondary btn-sm" id="btn-upload-watermark">📁 Subir</button>
+                    </div>
+                    <input type="file" id="watermark-file-input" accept="image/png" class="hidden">
+                  </div>
+                </div>
+
+                <!-- Leyenda adicional -->
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="cfg-leyenda">Leyenda / Información de Pago al pie del comprobante</label>
+                    <textarea id="cfg-leyenda" rows="3" placeholder="Ej: Banco Galicia - CBU: 00701234... - Alias: MI.EMPRESA.PAGOS&#10;Plazo de pago: 15 días corridos. Gracias por su compra."></textarea>
+                  </div>
+                </div>
+
+                <div class="preview-sample-bar">
+                  <button type="button" class="btn btn-secondary" id="btn-preview-sample-pdf">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                    Previsualizar Factura de Prueba con este Diseño
+                  </button>
+                </div>
+              </div>
+
+              <div class="form-actions-bar">
+                <button type="button" class="btn btn-secondary" id="btn-test-conexion">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                  Probar Conexión AFIP
+                </button>
+                <button type="submit" class="btn btn-primary" id="btn-guardar-config">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                  Guardar en .env
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div class="card diagnosis-card">
+          <div class="card-header">
+            <h2>Diagnóstico de Conexión AFIP</h2>
+          </div>
+          <div class="card-body" id="diagnosis-body">
+            <p class="text-muted">Haga clic en <strong>"Probar Conexión AFIP"</strong> para verificar la autenticación WSAA y la comunicación con el WebService WSFEv1.</p>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- TAB 5: ASISTENTE CLAVE & CSR -->
+    <main class="tab-content" id="tab-csr">
+      <div class="csr-grid">
+        <div class="card">
+          <div class="card-header">
+            <h2>Generador de Clave Privada y Archivo CSR</h2>
+          </div>
+          <div class="card-body">
+            <p class="description-text">
+              Para tramitar el certificado digital de AFIP/ARCA, se genera un par de claves criptográficas RSA y un archivo <strong>CSR (Certificate Signing Request)</strong> que luego se sube a la web de AFIP con Clave Fiscal.
+            </p>
+            <form id="form-csr">
+              <div class="form-row form-row-2">
+                <div class="form-group">
+                  <label for="csr-cuit">CUIT del Emisor</label>
+                  <input type="text" id="csr-cuit" placeholder="20123456789" required>
+                </div>
+                <div class="form-group">
+                  <label for="csr-razon-social">Razón Social o Nombre Completo</label>
+                  <input type="text" id="csr-razon-social" placeholder="Ej: Juan Pérez o Mi Empresa SA" required>
+                </div>
+              </div>
+              <div class="form-row form-row-2">
+                <div class="form-group">
+                  <label for="csr-bits">Longitud de Clave RSA</label>
+                  <select id="csr-bits">
+                    <option value="2048" selected>2048 bits (Recomendado estándar AFIP)</option>
+                    <option value="4096">4096 bits (Alta seguridad)</option>
+                  </select>
+                </div>
+              </div>
+              <button type="submit" class="btn btn-primary" id="btn-generar-csr">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                Generar Clave y CSR
+              </button>
+            </form>
+
+            <div class="csr-result-box hidden" id="csr-result-container">
+              <h3>CSR Generado con Éxito</h3>
+              <p>El archivo fue guardado en: <code id="csr-file-path"></code></p>
+              <textarea id="csr-text" readonly rows="8"></textarea>
+              <div class="csr-actions">
+                <button type="button" class="btn btn-secondary" id="btn-copy-csr">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  Copiar Contenido CSR
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card steps-card">
+          <div class="card-header">
+            <h2>Pasos para obtener el certificado en AFIP</h2>
+          </div>
+          <div class="card-body">
+            <ol class="steps-list">
+              <li>
+                <strong>Ingresar al portal de AFIP / ARCA:</strong>
+                <p>Acceda a <a href="https://auth.afip.gob.ar/" target="_blank">auth.afip.gob.ar</a> con Clave Fiscal Nivel 3 o superior.</p>
+              </li>
+              <li>
+                <strong>Entrar al servicio WSASS:</strong>
+                <p>Busque en los servicios habilitados: <em>"Administración de Certificados Digitales"</em> o <em>"WSASS (Autogestión Servicios Web)"</em>.</p>
+              </li>
+              <li>
+                <strong>Crear Alias y Subir el CSR:</strong>
+                <p>Indique un nombre de alias (ej: <code>facturador_cli</code>) y pegue el contenido del CSR generado o suba el archivo <code>.csr</code>.</p>
+              </li>
+              <li>
+                <strong>Descargar el Certificado (.crt):</strong>
+                <p>Descargue el archivo de certificado y guárdelo en la carpeta <code>certs/</code> de este proyecto.</p>
+              </li>
+              <li>
+                <strong>Asociar el servicio WSFE:</strong>
+                <p>En el <em>"Administrador de Relaciones de Clave Fiscal"</em>, vincule el servicio <strong>Facturación Electrónica (WSFEv1)</strong> con el alias del certificado creado.</p>
+              </li>
+            </ol>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- MODAL DE VISOR PDF E IMPRESIÓN -->
+  <div class="modal-backdrop hidden" id="modal-pdf">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title-box">
+          <h3 id="modal-pdf-title">Comprobante Autorizado</h3>
+          <span class="modal-subtitle" id="modal-pdf-subtitle">CAE: -- | Vto: --</span>
+        </div>
+        <div class="modal-header-actions">
+          <button type="button" class="btn btn-primary" id="btn-print-modal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+            Imprimir Comprobante
+          </button>
+          <a class="btn btn-secondary" id="btn-download-pdf" href="#" download>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            Descargar
+          </a>
+          <button type="button" class="btn-close" id="btn-close-modal">✕</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <iframe id="pdf-viewer-frame" src="about:blank"></iframe>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST CONTAINER -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
