@@ -12,11 +12,17 @@ Incluye **CLI**, **Dashboard Web interactivo**, **Servidor MCP multiplataforma**
 
 - 🧾 **Emisión de Comprobantes Oficiales:** Facturas A, B y C, Notas de Crédito y Débito (A, B y C).
 - 🖥️ **Dashboard Web Moderno (GUI):** Interfaz web completa (FastAPI + HTML5/CSS Vanilla) con visor PDF embebido e impresión directa.
-- 📦 **Facturación por Lotes (CSV):**
-  - Carga masiva mediante archivo CSV con plantilla descargable.
-  - Tabla interactiva de previsualización antes de emitir (desglose automático de Neto, IVA y validación de CUITs).
-  - Modos de ejecución: **Simulación Local (Dry-Run)**, **Homologación AFIP (Testing real)** y **Producción**.
+- 📦 **Facturación por Lotes Avanzada (CSV):**
+  - Carga masiva mediante archivo CSV compatible con exportaciones administrativas y de obras sociales.
+  - Tabla interactiva de previsualización antes de emitir (desglose automático de Neto, IVA, Exentos y validación de CUITs).
+  - **Soporte Inteligente de Exentos (0% IVA):** Enrutamiento automático a `ImpOpEx` para internación geriátrica y prestaciones médicas exentas (evitando el error 10070 de AFIP).
+  - **Resolución Monótona de Fechas:** Garantiza que cada comprobante cumpla con la ventana N-10 a N+10 de servicios y la correlatividad temporal estricta de AFIP (evitando el error 10016).
+  - **Protección Anti-Duplicados:** Detección automática de comprobantes previamente autorizados en el período para evitar doble facturación accidental.
+  - Modos de ejecución: **Simulación Local (Dry-Run)**, **Homologación AFIP (Testing real sin consecuencias fiscales)** y **Producción Oficial**.
   - Descarga consolidada de todos los comprobantes en un archivo **ZIP**.
+- 🪪 **Catálogo Oficial Completo de Documentos (AFIP):** Soporte exhaustivo para CUIT (80), CUIL (86), CDI (87), Libreta de Enrolamiento (89), Libreta Cívica (90), CI Extranjera (91), DNI (96), Pasaporte (94), CI Policía Federal (0), Certificado de Migración (95) y Sin Documento (99).
+- 📡 **Monitor AFIP Online en Tiempo Real:** Visualización en vivo del último comprobante registrado en los servidores de AFIP y del próximo número a emitir para cada Punto de Venta y tipo de comprobante.
+- 🏛️ **Padrón A13 con Nombres Reales:** Autocompletado instantáneo de Razón Social y Domicilio fiscal consultando en producción para obtener siempre las denominaciones reales, aun en entorno de testing.
 - 🎨 **Personalización y Diseño de Facturas PDF:**
   - Carga de **Logotipo comercial** de la empresa en la cabecera.
   - Recuadro para **Leyenda / Datos Bancarios** (CBU, Alias, Banco, observaciones comerciales).
