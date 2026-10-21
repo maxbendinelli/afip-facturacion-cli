@@ -469,7 +469,8 @@ async function emitirFactura() {
 
   const payload = {
     cbte_tipo: activeCbteTipo,
-    cuit_cliente: docTipo === 99 ? "SIN_CUIT" : docNro,
+    doc_tipo: docTipo,
+    cuit_cliente: docTipo === 99 ? "0" : docNro,
     nombre_cliente: nombre,
     concepto_afip: parseInt(document.getElementById("op-concepto").value),
     condicion_iva_receptor: parseInt(condIvaVal),

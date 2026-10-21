@@ -79,13 +79,25 @@ def _last_day_of_month(d: date) -> date:
     return next_month - timedelta(days=next_month.day)
 
 
-def _parse_doc(raw: str) -> tuple[int, str]:
-    raw_s = str(raw or "").strip().replace("-", "").replace(" ", "").replace(".", "")
-    if raw_s.isdigit() and len(raw_s) == 11:
-        return 80, raw_s
-    if raw_s.isdigit() and 6 <= len(raw_s) <= 8:
-        return 96, raw_s
-    if raw_s.upper() in ("SIN_CUIT", "0", ""):
+def _parse_doc(raw: str, default_tipo: Optional[int] = None) -> tuple[int, str]:
+    raw_clean = str(raw or "").strip().replace("-", "").replace(" ", "").replace(".", "")
+    raw_upper = raw_clean.upper()
+
+    # Detección de prefijos si vienen en el texto
+    for prefix, tipo in [("CUIT", 80), ("CUIL", 86), ("CDI", 87), ("LE", 89), ("LC", 90), ("DNI", 96), ("PAS", 94), ("CI", 91)]:
+        if raw_upper.startswith(prefix):
+            clean_num = raw_upper[len(prefix):].strip()
+            if clean_num.isdigit():
+                return tipo, clean_num
+
+    if default_tipo is not None:
+        return default_tipo, raw_clean if raw_clean.isdigit() else "0"
+
+    if raw_clean.isdigit() and len(raw_clean) == 11:
+        return 80, raw_clean
+    if raw_clean.isdigit() and 6 <= len(raw_clean) <= 8:
+        return 96, raw_clean
+    if raw_upper in ("SIN_CUIT", "0", ""):
         return 99, "0"
     raise ValueError(f"Formato de documento inválido: '{raw}'")
 
@@ -118,7 +130,8 @@ class ItemIn(BaseModel):
 
 
 class EmitirIn(BaseModel):
-    cbte_tipo: int = 11  # 1: Factura A, 6: Factura B, 11: Factura C
+    cbte_tipo: int = 11
+    doc_tipo: Optional[int] = None  # 1: Factura A, 6: Factura B, 11: Factura C
     cuit_cliente: str = "SIN_CUIT"
     nombre_cliente: Optional[str] = None
     concepto: Optional[str] = None
@@ -223,6 +236,9 @@ def get_meta():
         "comprobantes": [
             {"id": k, "nombre": v, "letra": CBTE_LETRA.get(k, "C")}
             for k, v in CBTE_NOMBRE.items()
+        ],
+        "tipos_doc": [
+            {"id": k, "nombre": v} for k, v in DOC_TIPO_NOMBRE.items()
         ],
         "condiciones_iva": [
             {"id": k, "nombre": v} for k, v in COND_IVA_NOMBRE.items()
@@ -499,10 +515,16 @@ def emitir_comprobante(payload: EmitirIn):
         except InvalidOperation:
             raise HTTPException(status_code=400, detail=f"Monto inválido: {payload.monto}")
 
-    try:
-        doc_tipo, doc_nro = _parse_doc(payload.cuit_cliente)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    if payload.doc_tipo is not None:
+        doc_tipo = payload.doc_tipo
+        doc_nro = str(payload.cuit_cliente or "").strip().replace("-", "").replace(" ", "").replace(".", "")
+        if doc_tipo == 99 and (not doc_nro or doc_nro in ("0", "SIN_CUIT")):
+            doc_nro = "0"
+    else:
+        try:
+            doc_tipo, doc_nro = _parse_doc(payload.cuit_cliente)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     if payload.cbte_tipo in (1, 2, 3) and doc_tipo != 80:
         raise HTTPException(

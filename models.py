@@ -57,8 +57,18 @@ IVA_ALICUOTAS = {
 
 DOC_TIPO_NOMBRE = {
     80: "CUIT",
+    86: "CUIL",
+    87: "CDI",
+    89: "LE",
+    90: "LC",
+    91: "CI Extranjera",
     96: "DNI",
-    99: "Consumidor Final",
+    94: "Pasaporte",
+    0: "CI Policía Federal",
+    95: "Certificado de Migración",
+    92: "En trámite",
+    93: "Acta Nacimiento",
+    99: "Doc. (Otro) / Consumidor Final",
 }
 
 # Condiciones IVA según RG 5616 / WSFEv1 / AFIP Comprobantes en Línea
