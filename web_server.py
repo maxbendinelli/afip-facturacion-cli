@@ -37,7 +37,7 @@ from wsaa import get_token_sign
 from wsfev1 import (
     buscar_rango,
     consultar_comprobante,
-    get_ultimo_numero,
+    get_ultimo_numero, get_ultimo_comprobante_info,
     solicitar_cae,
 )
 
@@ -129,6 +129,9 @@ class EmitirIn(BaseModel):
     periodo_desde: Optional[str] = None
     periodo_hasta: Optional[str] = None
     fecha_vto_pago: Optional[str] = None
+    cae: Optional[str] = None
+    comprobante: Optional[str] = None
+    status: Optional[str] = None
     monto: Optional[float] = None
     items: List[ItemIn] = []
     numero_original: Optional[int] = None
@@ -187,6 +190,9 @@ class LoteRowIn(BaseModel):
     periodo_desde: Optional[str] = None
     periodo_hasta: Optional[str] = None
     fecha_vto_pago: Optional[str] = None
+    cae: Optional[str] = None
+    comprobante: Optional[str] = None
+    status: Optional[str] = None
 
 
 class LoteEmitirIn(BaseModel):
@@ -902,8 +908,26 @@ def emitir_lote(payload: LoteEmitirIn):
     resultados = []
     exitosos = 0
     fallidos = 0
+    ult_cache = {}
+    hoy_dt = date.today()
+    min_permitida = hoy_dt - timedelta(days=10)
+    max_permitida = hoy_dt + timedelta(days=10)
 
     for item in payload.rows:
+        # Si ya fue autorizado con éxito, no duplicar emisión
+        if item.cae and str(item.cae).strip() and not payload.dry_run:
+            resultados.append({
+                "index": item.index,
+                "status": "ok",
+                "tipo": item.tipo,
+                "comprobante": item.comprobante or "",
+                "cae": item.cae,
+                "monto": str(item.monto),
+                "cliente": item.nombre_cliente,
+                "mensaje": "Comprobante ya autorizado previamente",
+            })
+            exitosos += 1
+            continue
         try:
             monto_dec = Decimal(str(item.monto)).quantize(Decimal("0.01"))
             doc_tipo, doc_nro = _parse_doc(item.cuit_cliente)
@@ -939,20 +963,41 @@ def emitir_lote(payload: LoteEmitirIn):
                 continue
 
             # Modo Real AFIP
-            ultimo = get_ultimo_numero(cfg, token, sign, item.cbte_tipo)
-            proximo_nro = ultimo + 1
+            cbte_tipo = item.cbte_tipo
+            if cbte_tipo not in ult_cache:
+                nro, fch = get_ultimo_comprobante_info(cfg, token, sign, cbte_tipo)
+                ult_cache[cbte_tipo] = {"nro": nro, "fecha": fch}
 
-            fecha_emision = item.fecha or hoy
+            proximo_nro = ult_cache[cbte_tipo]["nro"] + 1
+
+            # Resolución estricta de fecha para cumplir con las reglas de AFIP:
+            # 1. Ventana N-10 a N+10 de hoy
+            # 2. CbteFch >= fecha del último comprobante emitido
             try:
-                dt_emision = datetime.strptime(fecha_emision, "%Y%m%d").date()
-                if abs((dt_emision - date.today()).days) > 10:
-                    fecha_emision = hoy
+                dt_deseada = datetime.strptime(item.fecha, "%Y%m%d").date() if item.fecha else hoy_dt
             except Exception:
-                fecha_emision = hoy
+                dt_deseada = hoy_dt
 
+            if dt_deseada > max_permitida:
+                dt_calc = max_permitida
+            elif dt_deseada < min_permitida:
+                dt_calc = hoy_dt
+            else:
+                dt_calc = dt_deseada
+
+            ult_fch_str = ult_cache[cbte_tipo]["fecha"]
+            if ult_fch_str:
+                try:
+                    dt_ult = datetime.strptime(ult_fch_str, "%Y%m%d").date()
+                    if dt_calc < dt_ult:
+                        dt_calc = dt_ult
+                except Exception:
+                    pass
+
+            fecha_emision = dt_calc.strftime("%Y%m%d")
             serv_desde = item.periodo_desde or (hoy[:6] + "01")
             serv_hasta = item.periodo_hasta or hoy
-            vto_pago = item.fecha_vto_pago or hoy
+            vto_pago = item.fecha_vto_pago or fecha_emision
             if vto_pago < fecha_emision:
                 vto_pago = fecha_emision
 

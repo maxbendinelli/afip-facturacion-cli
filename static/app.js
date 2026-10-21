@@ -678,13 +678,19 @@ async function emitirLoteActual() {
   const env = (modo === "prod") ? "prod" : "homo";
   const duplicado = document.getElementById("chk-lote-duplicado")?.checked ?? false;
 
+  const yaEmitidos = currentLoteParsed.rows.filter(r => r.cae && r.cae.trim()).length;
+  const pendientesCount = currentLoteParsed.rows.length - yaEmitidos;
+  const infoLote = yaEmitidos > 0 
+    ? `(${pendientesCount} comprobantes pendientes, ${yaEmitidos} ya emitidos que se omitirán)`
+    : `(${currentLoteParsed.rows.length} comprobantes)`;
+
   let confirmMsg = "";
   if (modo === "dryrun") {
     confirmMsg = `🧪 MODO SIMULACIÓN LOCAL (DRY-RUN)\n\n¿Desea iniciar la simulación de ${currentLoteParsed.rows.length} comprobantes?\n\n• NO se contactará a AFIP.\n• No tiene costo ni impacto alguno.\n• Genera comprobantes y PDFs ficticios para previsualizar.`;
   } else if (modo === "homo") {
-    confirmMsg = `🔬 MODO AFIP HOMOLOGACIÓN (TESTING REAL)\n\n¿Desea emitir el lote de ${currentLoteParsed.rows.length} comprobantes en AFIP HOMOLOGACIÓN?\n\n✓ Servidor de prueba: wswhomo.afip.gov.ar\n✓ Certificados de prueba (Homo)\n✓ Se obtendrán CAEs reales de prueba otorgados por AFIP\n✓ NO TIENE NINGÚN IMPACTO FISCAL NI LEGAL.\n\n¿Desea continuar?`;
+    confirmMsg = `🔬 MODO AFIP HOMOLOGACIÓN (TESTING REAL)\n\n¿Desea emitir en AFIP HOMOLOGACIÓN ${infoLote}?\n\n✓ Servidor de prueba: wswhomo.afip.gov.ar\n✓ Certificados de prueba (Homo)\n✓ Se obtendrán CAEs reales de prueba otorgados por AFIP\n✓ NO TIENE NINGÚN IMPACTO FISCAL NI LEGAL.\n\n¿Desea continuar?`;
   } else {
-    confirmMsg = `🔴 ATENCIÓN CRÍTICA: MODO PRODUCCIÓN OFICIAL\n\nEstá a punto de emitir ${currentLoteParsed.rows.length} comprobantes en AFIP PRODUCCIÓN.\n\n⚠️ ¡ESTOS COMPROBANTES SON OFICIALES Y TIENEN IMPACTO FISCAL REAL!\n⚠️ No se pueden borrar una vez autorizados por AFIP.\n\n¿Está completamente seguro de continuar con PRODUCCIÓN?`;
+    confirmMsg = `🔴 ATENCIÓN CRÍTICA: MODO PRODUCCIÓN OFICIAL\n\nEstá a punto de emitir ${infoLote} en AFIP PRODUCCIÓN.\n\n⚠️ ¡ESTOS COMPROBANTES SON OFICIALES Y TIENEN IMPACTO FISCAL REAL!\n⚠️ No se pueden borrar una vez autorizados por AFIP.\n\n¿Está completamente seguro de continuar con PRODUCCIÓN?`;
   }
 
   if (!confirm(confirmMsg)) return;
@@ -725,8 +731,15 @@ async function emitirLoteActual() {
 
     currentLoteId = data.lote_id;
 
-    // Actualizar estados en la tabla
+    // Guardar estado en memoria para no duplicar si reintenta
     data.resultados.forEach((resItem) => {
+      const targetRowObj = currentLoteParsed.rows.find(r => String(r.index) === String(resItem.index));
+      if (targetRowObj && resItem.status === "ok") {
+        targetRowObj.cae = resItem.cae;
+        targetRowObj.comprobante = resItem.comprobante;
+        targetRowObj.status = "ok";
+      }
+
       const row = document.getElementById(`lote-row-${resItem.index}`);
       if (row) {
         const statusCell = row.querySelector(".row-status-cell");

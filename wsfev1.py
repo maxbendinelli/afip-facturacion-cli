@@ -18,6 +18,35 @@ def _auth(config: Config, token: str, sign: str) -> dict:
     return {"Token": token, "Sign": sign, "Cuit": config.cuit}
 
 
+def get_ultimo_comprobante_info(config: Config, token: str, sign: str, cbte_tipo: int) -> tuple[int, str]:
+    """Retorna (ultimo_numero, ultima_fecha_yyyymmdd) del punto de venta y tipo."""
+    client = _build_client(config)
+    auth = _auth(config, token, sign)
+    resp = client.service.FECompUltimoAutorizado(
+        Auth=auth,
+        PtoVta=config.punto_venta,
+        CbteTipo=cbte_tipo,
+    )
+    _check_errors(resp)
+    nro = resp.CbteNro or 0
+    fch = ""
+    if nro > 0:
+        try:
+            c_resp = client.service.FECompConsultar(
+                Auth=auth,
+                FeCompConsReq={
+                    "PtoVta": config.punto_venta,
+                    "CbteTipo": cbte_tipo,
+                    "CbteNro": nro,
+                },
+            )
+            if c_resp and c_resp.ResultGet:
+                fch = c_resp.ResultGet.CbteFch or ""
+        except Exception:
+            pass
+    return nro, fch
+
+
 def get_ultimo_numero(config: Config, token: str, sign: str, cbte_tipo: int) -> int:
     client = _build_client(config)
     resp = client.service.FECompUltimoAutorizado(
