@@ -182,6 +182,24 @@ function updateBannerAndUI() {
     banner.style.color = "#67E8F9";
   }
 
+  // Consultar en vivo a AFIP el próximo número
+  const currentTipo = activeCbteTipo;
+  fetch(`/api/comprobantes/ultimo/${currentTipo}`)
+    .then(r => r.json())
+    .then(data => {
+      if (data.status === "ok" && currentTipo === activeCbteTipo) {
+        const ptoVta = String(data.punto_venta).padStart(4, "0");
+        const prox = String(data.proximo_numero).padStart(8, "0");
+        const extraSpan = document.createElement("div");
+        extraSpan.style.marginTop = "6px";
+        extraSpan.style.fontSize = "0.82rem";
+        extraSpan.style.color = "var(--text-main)";
+        extraSpan.innerHTML = `📡 <strong>AFIP Online:</strong> Próximo a emitir: <strong>${ptoVta}-${prox}</strong> (Último registrado en AFIP: #${data.ultimo_numero})`;
+        text.appendChild(extraSpan);
+      }
+    })
+    .catch(() => {});
+
   const isIvaVisible = activeLetra === "A" || activeLetra === "B";
   document.getElementById("th-iva-col").style.display = isIvaVisible ? "" : "none";
   document.querySelectorAll(".td-iva-col").forEach((td) => {
@@ -623,6 +641,22 @@ function renderLoteStats(tot) {
     <span class="badge" style="background:rgba(16,185,129,0.2); color:#6EE7B7;">B: ${tot.tipo_b}</span>
     <span class="badge" style="background:rgba(6,182,212,0.2); color:#67E8F9;">C: ${tot.tipo_c}</span>
   `;
+
+  const statAfip = document.getElementById("stat-afip-ultimo");
+  if (statAfip) {
+    Promise.all([
+      fetch("/api/comprobantes/ultimo/6").then(r => r.json()).catch(() => null),
+      fetch("/api/comprobantes/ultimo/1").then(r => r.json()).catch(() => null)
+    ]).then(([resB, resA]) => {
+      if (resB && resB.status === "ok") {
+        const uB = resB.ultimo_numero;
+        const uA = resA && resA.status === "ok" ? resA.ultimo_numero : "-";
+        statAfip.innerHTML = `PV ${resB.punto_venta} → B: <strong>#${uB}</strong> | A: <strong>#${uA}</strong>`;
+      } else {
+        statAfip.textContent = "No disponible";
+      }
+    });
+  }
 }
 
 function renderLoteTable(rows) {
