@@ -634,7 +634,9 @@ function renderLoteTable(rows) {
     tr.id = `lote-row-${r.index}`;
 
     let statusBadge = "";
-    if (r.status === "valido") {
+    if (r.cae) {
+      statusBadge = `<span class="badge badge-ok" style="background:#10B981; color:#fff;">Emitido ✓ (${r.comprobante})</span> ${r.pdf_filename ? `<a href="/api/comprobantes/download-pdf/${r.pdf_filename}" target="_blank" class="btn btn-sm btn-secondary" style="padding:1px 6px; font-size:0.75rem; margin-left:4px;">PDF</a>` : ""}`;
+    } else if (r.status === "valido") {
       statusBadge = '<span class="badge badge-ok">Válido ✓</span>';
     } else if (r.status === "advertencia") {
       statusBadge = `<span class="badge badge-warn" title="${r.warnings.join('; ')}">Advertencia ⚠️</span>`;

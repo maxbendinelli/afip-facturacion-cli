@@ -657,9 +657,33 @@ def get_csv_template():
     )
 
 
+def _get_existing_comprobantes_map() -> dict:
+    """Retorna un mapa (cuit, cbte_tipo, monto) -> dict de comprobante ya emitido."""
+    result = {}
+    if not COMPROBANTES_DIR.exists():
+        return result
+    for p in COMPROBANTES_DIR.glob("comprobante_*.json"):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            cuit = str(d.get("cuit_cliente", "")).strip().replace("-", "")
+            cbte_tipo = int(d.get("cbte_tipo", 0))
+            monto_str = str(Decimal(str(d.get("monto", "0"))).quantize(Decimal("0.01")))
+            key = f"{cuit}_{cbte_tipo}_{monto_str}"
+            result[key] = {
+                "cae": d.get("cae"),
+                "comprobante": d.get("comprobante"),
+                "pdf_filename": d.get("pdf_filename"),
+                "fecha": d.get("fecha"),
+            }
+        except Exception:
+            continue
+    return result
+
 @app.post("/api/lotes/parse-csv")
 async def parse_lote_csv(file: UploadFile = File(...)):
     """Parsea y valida un archivo CSV para generar el preview de la facturación por lotes."""
+    existing_map = _get_existing_comprobantes_map()
     raw_bytes = await file.read()
     try:
         text = raw_bytes.decode("utf-8-sig")
@@ -858,6 +882,22 @@ async def parse_lote_csv(file: UploadFile = File(...)):
         else:
             totales["validos"] += 1
 
+        # Chequear si ya existe emitido previamente
+        monto_dec_str = str(Decimal(str(monto)).quantize(Decimal("0.01")))
+        cuit_check = str(doc_nro).strip().replace("-", "")
+        exist_key = f"{cuit_check}_{cbte_tipo}_{monto_dec_str}"
+        exist_info = existing_map.get(exist_key)
+
+        cae_val = None
+        cbte_val = None
+        pdf_val = None
+        if exist_info:
+            cae_val = exist_info.get("cae")
+            cbte_val = exist_info.get("comprobante")
+            pdf_val = exist_info.get("pdf_filename")
+            status = "emitido"
+            warnings.append(f"Ya emitido: Comprobante {cbte_val} (CAE: {cae_val})")
+
         rows.append({
             "index": raw_row.get("INDEX") or idx,
             "tipo": tipo_str,
@@ -878,6 +918,9 @@ async def parse_lote_csv(file: UploadFile = File(...)):
             "periodo_desde": f_desde,
             "periodo_hasta": f_hasta,
             "fecha_vto_pago": f_vto,
+            "cae": cae_val,
+            "comprobante": cbte_val,
+            "pdf_filename": pdf_val,
             "status": status,
             "errors": errors,
             "warnings": warnings,
@@ -1021,6 +1064,7 @@ def emitir_lote(payload: LoteEmitirIn):
             )
 
             resp = solicitar_cae(cfg, token, sign, req)
+            ult_cache[cbte_tipo] = {"nro": resp.numero, "fecha": resp.fecha}
             resp.hora = datetime.now().strftime("%H%M%S")
             resp.fecha_vto_pago = hoy
 
@@ -1048,6 +1092,8 @@ def emitir_lote(payload: LoteEmitirIn):
             exitosos += 1
 
         except Exception as e:
+            if "cbte_tipo" in locals() and cbte_tipo in ult_cache:
+                ult_cache.pop(cbte_tipo, None)
             resultados.append({
                 "index": item.index,
                 "status": "error",
