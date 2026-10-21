@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/app.css?v=20261021_3">
 </head>
 <body class="dark-theme">
   <!-- Top Navigation Header -->
@@ -400,6 +400,7 @@
             <div class="header-actions-flex" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
               <div class="form-group" style="margin: 0; display: flex; align-items: center; gap: 8px;">
                 <label for="select-lote-modo" style="margin: 0; font-weight: 600; font-size: 0.85rem; color: var(--text-muted); white-space: nowrap;">Modo de Envío:</label>
+                <input type="checkbox" id="chk-lote-dryrun" style="display:none;">
                 <select id="select-lote-modo" class="form-control" style="width: auto; padding: 6px 12px; font-weight: 500; font-size: 0.85rem; border-radius: 6px; cursor: pointer; background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);">
                   <option value="homo" selected>🔬 AFIP Homologación (Pruebas reales en AFIP - Sin impacto fiscal)</option>
                   <option value="dryrun">🧪 Simulación Local (Dry-Run offline - Sin contactar AFIP)</option>
@@ -872,6 +873,6 @@
   <!-- TOAST CONTAINER -->
   <div class="toast-container" id="toast-container"></div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=20261021_3"></script>
 </body>
 </html>

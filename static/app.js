@@ -575,6 +575,14 @@ function setupLotesTab() {
   });
 
   btnEmitirLote.addEventListener("click", () => emitirLoteActual());
+  const selectModo = document.getElementById("select-lote-modo");
+  const fallbackChk = document.getElementById("chk-lote-dryrun");
+  if (selectModo && fallbackChk) {
+    selectModo.addEventListener("change", () => {
+      fallbackChk.checked = (selectModo.value === "dryrun");
+    });
+  }
+
 }
 
 async function handleCsvFile(file) {
@@ -657,10 +665,18 @@ async function emitirLoteActual() {
     return;
   }
 
-  const modo = document.getElementById("select-lote-modo") ? document.getElementById("select-lote-modo").value : "homo";
+  const modoSelect = document.getElementById("select-lote-modo");
+  const chkDryRun = document.getElementById("chk-lote-dryrun");
+  let modo = "homo";
+  if (modoSelect) {
+    modo = modoSelect.value;
+  } else if (chkDryRun && chkDryRun.checked) {
+    modo = "dryrun";
+  }
+
   const dryRun = (modo === "dryrun");
   const env = (modo === "prod") ? "prod" : "homo";
-  const duplicado = document.getElementById("chk-lote-duplicado") ? document.getElementById("chk-lote-duplicado").checked : false;
+  const duplicado = document.getElementById("chk-lote-duplicado")?.checked ?? false;
 
   let confirmMsg = "";
   if (modo === "dryrun") {
