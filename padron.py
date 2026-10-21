@@ -58,10 +58,27 @@ def buscar_persona(config: Config, cuit: str) -> dict | None:
 
     p = resp.persona
 
+    def _clean(val):
+        if val is None:
+            return ""
+        s = str(val).strip()
+        return "" if s.upper() == "NONE" else s
+
+    nom_c = _clean(getattr(p, "nombre", None))
+    ape_c = _clean(getattr(p, "apellido", None))
+    razon_c = _clean(getattr(p, "razonSocial", None))
+
     if getattr(p, "tipoPersona", None) == "FISICA":
-        nombre = f"{getattr(p, 'nombre', '')} {getattr(p, 'apellido', '')}".strip().title()
+        if nom_c and ape_c:
+            nombre = f"{nom_c} {ape_c}".strip().title()
+        elif ape_c:
+            nombre = ape_c.strip().title()
+        elif nom_c:
+            nombre = nom_c.strip().title()
+        else:
+            nombre = razon_c.strip().title()
     else:
-        nombre = (getattr(p, "razonSocial", None) or "").strip().title()
+        nombre = razon_c.strip().title() or f"{nom_c} {ape_c}".strip().title()
 
     domicilio_fiscal = next(
         (d for d in (getattr(p, "domicilio", None) or [])
