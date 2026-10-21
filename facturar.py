@@ -14,13 +14,42 @@ def _last_day_of_month(d: date) -> date:
     return next_month - timedelta(days=next_month.day)
 
 
-def _parse_doc(raw: str) -> tuple[int, str]:
-    digits = raw.strip().replace("-", "").replace(" ", "")
-    if digits.isdigit() and len(digits) == 11:
-        return 80, digits
-    if digits.isdigit() and len(digits) in (7, 8):
-        return 96, digits
-    if raw.strip().upper() in ("SIN_CUIT", ""):
+DOC_ALIAS = {
+    "CUIT": 80,
+    "CUIL": 86,
+    "CDI": 87,
+    "LE": 89,
+    "LC": 90,
+    "CI": 91,
+    "CI_EXTRANJERA": 91,
+    "DNI": 96,
+    "PAS": 94,
+    "PASAPORTE": 94,
+    "CI_POLICIA": 0,
+    "POLICIA": 0,
+    "MIGRACION": 95,
+    "SIN_CUIT": 99,
+    "CONSUMIDOR_FINAL": 99,
+}
+
+def _parse_doc(raw: str, default_tipo: int | None = None) -> tuple[int, str]:
+    raw_s = str(raw or "").strip().replace("-", "").replace(" ", "").replace(".", "")
+    raw_upper = raw_s.upper()
+
+    for prefix, tipo in [("CUIT", 80), ("CUIL", 86), ("CDI", 87), ("LE", 89), ("LC", 90), ("DNI", 96), ("PAS", 94), ("CI", 91)]:
+        if raw_upper.startswith(prefix):
+            clean_num = raw_upper[len(prefix):].strip()
+            if clean_num.isdigit():
+                return tipo, clean_num
+
+    if default_tipo is not None:
+        return default_tipo, raw_s if raw_s.isdigit() else "0"
+
+    if raw_s.isdigit() and len(raw_s) == 11:
+        return 80, raw_s
+    if raw_s.isdigit() and 6 <= len(raw_s) <= 8:
+        return 96, raw_s
+    if raw_upper in ("SIN_CUIT", "0", ""):
         return 99, "0"
     raise ValueError(f"Formato de documento inválido: '{raw}'")
 
@@ -147,8 +176,15 @@ def cmd_emitir(args) -> None:
             _output({"error": f"Monto inválido: '{args.monto}'"}, 1)
 
     # Parsear documento receptor
+    doc_tipo_override = None
+    if getattr(args, "doc_tipo", None):
+        raw_dt = str(args.doc_tipo).strip().upper()
+        doc_tipo_override = int(raw_dt) if raw_dt.isdigit() else DOC_ALIAS.get(raw_dt)
+        if doc_tipo_override is None:
+            _output({"error": f"Tipo de documento inválido: '{args.doc_tipo}'"}, 1)
+
     try:
-        doc_tipo, doc_nro = _parse_doc(args.cuit_cliente)
+        doc_tipo, doc_nro = _parse_doc(args.cuit_cliente, default_tipo=doc_tipo_override)
     except ValueError as e:
         _output({"error": str(e)}, 1)
 
@@ -651,6 +687,332 @@ def cmd_generar_pdf(args) -> None:
     _output({"status": "ok", "pdf": pdf_path})
 
 
+
+def cmd_lote(args) -> None:
+    from pathlib import Path
+    import csv
+    import zipfile
+    from wsfev1 import get_ultimo_comprobante_info, solicitar_cae
+    from wsaa import get_token_sign
+    from pdf_generator import generate_pdf
+
+    csv_path = Path(args.csv_file)
+    if not csv_path.exists():
+        _output({"error": f"Archivo CSV no encontrado: {args.csv_file}"}, 1)
+
+    try:
+        config = load_config(args.env, args.dry_run)
+    except ConfigError as e:
+        _output({"error": str(e)}, 1)
+
+    raw_bytes = csv_path.read_bytes()
+    try:
+        text = raw_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw_bytes.decode("latin-1", errors="replace")
+
+    all_lines = [l for l in text.splitlines() if l.strip()]
+    if not all_lines:
+        _output({"error": "El archivo CSV está vacío."}, 1)
+
+    header_idx = 0
+    for i, line in enumerate(all_lines[:35]):
+        ll = line.lower()
+        if "destinatario" in ll or "dni/cuit" in ll or "cuit_cliente" in ll or "tipo comp" in ll or "producto o servicio" in ll:
+            header_idx = i
+            break
+        elif "cuit" in ll and "monto" in ll:
+            header_idx = i
+            break
+
+    sub_lines = all_lines[header_idx:]
+    first_line = sub_lines[0]
+    delimiter = ";" if ";" in first_line and first_line.count(";") >= first_line.count(",") else ","
+
+    reader = csv.DictReader(sub_lines, delimiter=delimiter)
+    parsed_rows = []
+
+    def _parse_d_afip(val):
+        if not val: return None
+        v = str(val).strip().replace("-", "").replace("/", "")
+        if len(v) == 8 and v.isdigit(): return v
+        for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+            try: return datetime.strptime(str(val).strip(), fmt).strftime("%Y%m%d")
+            except Exception: pass
+        return None
+
+    # Mapeo de existentes en comprobantes/ para evitar duplicados
+    comprobantes_dir = Path("./comprobantes")
+    comprobantes_dir.mkdir(parents=True, exist_ok=True)
+    existing_map = {}
+    for p in comprobantes_dir.glob("comprobante_*.json"):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            cuit_e = str(d.get("cuit_cliente", "")).strip().replace("-", "")
+            cbte_e = int(d.get("cbte_tipo", 0))
+            monto_e = str(Decimal(str(d.get("monto", "0"))).quantize(Decimal("0.01")))
+            existing_map[f"{cuit_e}_{cbte_e}_{monto_e}"] = d
+        except Exception:
+            continue
+
+    col_map = {
+        "destinatario factura": "nombre_cliente", "cliente": "nombre_cliente",
+        "dni/cuit": "cuit_cliente", "cuit": "cuit_cliente", "dni": "cuit_cliente",
+        "tipo comp.": "tipo", "tipo": "tipo",
+        "total": "monto", "importe": "monto", "monto": "monto",
+        "alic. iva %": "alicuota_iva", "iva": "alicuota_iva",
+        "fecha": "fecha", "f.emision": "fecha",
+        "desde": "periodo_desde", "hasta": "periodo_hasta",
+        "f.vto": "fecha_vto_pago", "concepto": "concepto",
+    }
+
+    for idx, raw_row in enumerate(reader, 1):
+        row = {col_map.get(k.strip().lower(), k.strip().lower()): v for k, v in raw_row.items() if k}
+        if str(row.get("factura") or "").strip().upper() == "NO":
+            continue
+
+        dni_field = (row.get("cuit_cliente") or "").strip()
+        nombre = (row.get("nombre_cliente") or "").strip()
+        monto_raw = (row.get("monto") or "0").replace("$", "").replace(" ", "")
+        if not nombre and not dni_field and monto_raw in ("", "0"):
+            continue
+
+        tipo_raw = (row.get("tipo") or "C").upper().strip()
+        if "FACTURA A" in tipo_raw or tipo_raw == "A": tipo_str = "A"
+        elif "FACTURA B" in tipo_raw or tipo_raw == "B": tipo_str = "B"
+        else: tipo_str = "C"
+
+        cbte_tipo = CBTE_TIPO.get(tipo_str, 11)
+        concepto = (row.get("concepto") or "Servicios").strip()
+
+        if "," in monto_raw and "." in monto_raw:
+            monto_raw = monto_raw.replace(".", "").replace(",", ".")
+        elif "," in monto_raw and "." not in monto_raw:
+            monto_raw = monto_raw.replace(",", ".")
+        try: monto = float(monto_raw)
+        except Exception: monto = 0.0
+
+        alic_raw = (row.get("alicuota_iva") or ("21" if tipo_str in ("A", "B") else "0")).replace("%", "").strip().upper()
+        if "EXENTO" in alic_raw or alic_raw == "0": alic_iva = 0.0
+        elif "10.5" in alic_raw: alic_iva = 10.5
+        elif "27" in alic_raw: alic_iva = 27.0
+        else:
+            try: alic_iva = float(alic_raw)
+            except Exception: alic_iva = 21.0 if tipo_str in ("A", "B") else 0.0
+
+        cond_id = 1 if tipo_str == "A" else 5
+        try: doc_tipo, doc_nro = _parse_doc(dni_field)
+        except Exception: doc_tipo, doc_nro = (99, "0")
+
+        f_emision = _parse_d_afip(row.get("fecha"))
+        f_desde = _parse_d_afip(row.get("periodo_desde"))
+        f_hasta = _parse_d_afip(row.get("periodo_hasta"))
+        f_vto = _parse_d_afip(row.get("fecha_vto_pago"))
+
+        monto_dec_str = str(Decimal(str(monto)).quantize(Decimal("0.01")))
+        exist_key = f"{doc_nro}_{cbte_tipo}_{monto_dec_str}"
+        exist_info = existing_map.get(exist_key)
+
+        parsed_rows.append({
+            "index": int(raw_row.get("INDEX") or idx) if str(raw_row.get("INDEX") or idx).isdigit() else idx,
+            "tipo": tipo_str,
+            "cbte_tipo": cbte_tipo,
+            "cuit_cliente": doc_nro,
+            "doc_tipo": doc_tipo,
+            "doc_nro": doc_nro,
+            "nombre_cliente": nombre or "Consumidor Final",
+            "concepto": concepto,
+            "monto": monto,
+            "alicuota_iva": alic_iva,
+            "condicion_iva_receptor": cond_id,
+            "condicion_venta": (row.get("condicion_venta") or "Contado").strip(),
+            "concepto_afip": 2,
+            "fecha": f_emision,
+            "periodo_desde": f_desde,
+            "periodo_hasta": f_hasta,
+            "fecha_vto_pago": f_vto,
+            "cae": exist_info.get("cae") if exist_info else None,
+            "comprobante": exist_info.get("comprobante") if exist_info else None,
+            "pdf_filename": exist_info.get("pdf_filename") if exist_info else None,
+            "ya_emitido": bool(exist_info),
+        })
+
+    sys.stderr.write(f"\n📦 Lote cargado: {len(parsed_rows)} comprobantes interpretados.\n")
+    ya_emitidos = sum(1 for r in parsed_rows if r["ya_emitido"])
+    if ya_emitidos > 0:
+        sys.stderr.write(f"ℹ️  {ya_emitidos} comprobantes ya fueron emitidos previamente y se omitirán para no duplicar.\n")
+
+    pendientes = [r for r in parsed_rows if not r["ya_emitido"]]
+    sys.stderr.write(f"🚀 Pendientes de emisión: {len(pendientes)} comprobantes en entorno {config.env.upper()}\n\n")
+
+    token, sign = (None, None)
+    if not config.dry_run:
+        token, sign = get_token_sign(config)
+
+    ult_cache = {}
+    hoy_dt = date.today()
+    min_permitida = hoy_dt - timedelta(days=10)
+    max_permitida = hoy_dt + timedelta(days=10)
+
+    resultados = []
+    exitosos = 0
+    fallidos = 0
+    generated_pdfs = []
+
+    for item in parsed_rows:
+        if item["ya_emitido"] and not config.dry_run:
+            resultados.append({
+                "index": item["index"],
+                "status": "ok",
+                "tipo": item["tipo"],
+                "comprobante": item["comprobante"],
+                "cae": item["cae"],
+                "monto": item["monto"],
+                "cliente": item["nombre_cliente"],
+                "mensaje": "Previamente emitido",
+            })
+            exitosos += 1
+            continue
+
+        try:
+            monto_dec = Decimal(str(item["monto"])).quantize(Decimal("0.01"))
+            alic_dec = Decimal(str(item["alicuota_iva"])).quantize(Decimal("0.1"))
+            alic_id = 3 if alic_dec == Decimal("0.0") else 5
+
+            if item["cbte_tipo"] in (1, 6):
+                if alic_dec == Decimal("0.0"):
+                    neto_dec = monto_dec
+                    items_obj = [InvoiceItem(descripcion=item["concepto"], cantidad=Decimal("1.00"), precio_unitario=neto_dec, alicuota_iva=Decimal("0.0"), alicuota_iva_id=3)]
+                else:
+                    neto_dec = (monto_dec / (Decimal("1.00") + (alic_dec / Decimal("100")))).quantize(Decimal("0.01"))
+                    items_obj = [InvoiceItem(descripcion=item["concepto"], cantidad=Decimal("1.00"), precio_unitario=neto_dec, alicuota_iva=alic_dec, alicuota_iva_id=alic_id)]
+            else:
+                items_obj = [InvoiceItem(descripcion=item["concepto"], cantidad=Decimal("1.00"), precio_unitario=monto_dec, alicuota_iva=Decimal("0.0"), alicuota_iva_id=3)]
+
+            if config.dry_run:
+                resultados.append({
+                    "index": item["index"],
+                    "status": "ok",
+                    "tipo": item["tipo"],
+                    "comprobante": f"SIM-{item['index']:04d}",
+                    "cae": "SIMULADO_123456",
+                    "monto": str(monto_dec),
+                    "cliente": item["nombre_cliente"],
+                })
+                exitosos += 1
+                sys.stderr.write(f"  [DRY-RUN] #{item['index']} {item['tipo']} {item['nombre_cliente']} -> $ {monto_dec:,.2f}\n")
+                continue
+
+            cbte_tipo = item["cbte_tipo"]
+            if cbte_tipo not in ult_cache:
+                nro, fch = get_ultimo_comprobante_info(config, token, sign, cbte_tipo)
+                ult_cache[cbte_tipo] = {"nro": nro, "fecha": fch}
+
+            proximo_nro = ult_cache[cbte_tipo]["nro"] + 1
+
+            try: dt_deseada = datetime.strptime(item["fecha"], "%Y%m%d").date() if item.get("fecha") else hoy_dt
+            except Exception: dt_deseada = hoy_dt
+
+            if dt_deseada > max_permitida: dt_calc = max_permitida
+            elif dt_deseada < min_permitida: dt_calc = hoy_dt
+            else: dt_calc = dt_deseada
+
+            ult_fch_str = ult_cache[cbte_tipo]["fecha"]
+            if ult_fch_str:
+                try:
+                    dt_ult = datetime.strptime(ult_fch_str, "%Y%m%d").date()
+                    if dt_calc < dt_ult: dt_calc = dt_ult
+                except Exception: pass
+
+            fecha_emision = dt_calc.strftime("%Y%m%d")
+            serv_desde = item.get("periodo_desde") or (hoy_dt.strftime("%Y%m") + "01")
+            serv_hasta = item.get("periodo_hasta") or hoy_dt.strftime("%Y%m%d")
+            vto_pago = item.get("fecha_vto_pago") or fecha_emision
+            if vto_pago < fecha_emision: vto_pago = fecha_emision
+
+            req = InvoiceRequest(
+                cbte_tipo=cbte_tipo,
+                cuit_cliente=item["doc_nro"],
+                nombre_cliente=item["nombre_cliente"],
+                monto=monto_dec,
+                concepto=item["concepto"],
+                concepto_afip=item["concepto_afip"],
+                numero=proximo_nro,
+                fecha=fecha_emision,
+                fecha_serv_desde=serv_desde,
+                fecha_serv_hasta=serv_hasta,
+                fecha_vto_pago=vto_pago,
+                doc_tipo=item["doc_tipo"],
+                doc_nro=item["doc_nro"],
+                condicion_iva_receptor=item["condicion_iva_receptor"],
+                condicion_venta=item["condicion_venta"],
+                items=items_obj,
+            )
+
+            resp = solicitar_cae(config, token, sign, req)
+            ult_cache[cbte_tipo] = {"nro": resp.numero, "fecha": resp.fecha}
+            resp.hora = datetime.now().strftime("%H%M%S")
+            resp.fecha_vto_pago = vto_pago
+
+            letra = "A" if cbte_tipo == 1 else ("B" if cbte_tipo == 6 else "C")
+            pdf_name = f"comprobante_{letra.lower()}_{resp.punto_venta:04d}_{resp.numero:08d}.pdf"
+            pdf_path = comprobantes_dir / pdf_name
+            if args.pdf:
+                generate_pdf(config, resp, str(pdf_path), duplicado=args.duplicado)
+                generated_pdfs.append(pdf_path)
+
+            resp_dict = resp.to_json()
+            resp_dict["pdf_filename"] = pdf_name
+            with open(comprobantes_dir / f"comprobante_{letra.lower()}_{resp.punto_venta:04d}_{resp.numero:08d}.json", "w", encoding="utf-8") as f:
+                json.dump(resp_dict, f, ensure_ascii=False)
+
+            resultados.append({
+                "index": item["index"],
+                "status": "ok",
+                "tipo": item["tipo"],
+                "comprobante": f"{resp.punto_venta:04d}-{resp.numero:08d}",
+                "cae": resp.cae,
+                "cae_vencimiento": resp.cae_vencimiento,
+                "monto": str(resp.monto),
+                "cliente": resp.nombre_cliente,
+                "pdf": str(pdf_path) if args.pdf else None,
+            })
+            exitosos += 1
+            sys.stderr.write(f"  ✓ [{exitosos}/{len(parsed_rows)}] {item['tipo']} {resp.punto_venta:04d}-{resp.numero:08d} CAE:{resp.cae} -> {resp.nombre_cliente}\n")
+
+        except Exception as e:
+            if "cbte_tipo" in locals() and cbte_tipo in ult_cache:
+                ult_cache.pop(cbte_tipo, None)
+            resultados.append({
+                "index": item["index"],
+                "status": "error",
+                "tipo": item["tipo"],
+                "cliente": item["nombre_cliente"],
+                "monto": str(item["monto"]),
+                "error": str(e),
+            })
+            fallidos += 1
+            sys.stderr.write(f"  ✕ [{item['index']}] ERROR {item['nombre_cliente']}: {e}\n")
+
+    # Si se pide zip consolidado
+    if getattr(args, "zip", None) and generated_pdfs:
+        zip_path = Path(args.zip)
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for p in generated_pdfs:
+                if p.exists():
+                    zf.write(p, arcname=p.name)
+        sys.stderr.write(f"\n🗜️  Archivo ZIP consolidado creado en: {zip_path.resolve()}\n")
+
+    resumen = {
+        "status": "ok" if fallidos == 0 else "parcial",
+        "total": len(parsed_rows),
+        "exitosos": exitosos,
+        "fallidos": fallidos,
+        "resultados": resultados,
+    }
+    _output(resumen, 0 if fallidos == 0 else 1)
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Script CLI de facturación electrónica ARCA/AFIP"
@@ -671,6 +1033,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Concepto general. Opcional si se usan --item")
     p_emit.add_argument("--concepto-afip", type=int, choices=[1, 2, 3], default=2,
                         metavar="{1,2,3}", help="1=productos 2=servicios(default) 3=ambos")
+    p_emit.add_argument("--doc-tipo", default=None, metavar="TIPO",
+                        help="Tipo de documento (CUIT, CUIL, DNI, LE, LC, PASAPORTE, etc., o código 80, 86, 96, 89, 90, 94...)")
     p_emit.add_argument("--condicion-iva", default=None, metavar="COND",
                         help=(
                             "Condición IVA del receptor. Puede ser un número (RG 5616) "
@@ -748,6 +1112,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_reim.add_argument("--output", metavar="ARCHIVO.pdf")
     p_reim.add_argument("--env", choices=["homo", "prod"], default="prod")
 
+    # --- lote ---
+    p_lote = sub.add_parser("lote", help="Emitir facturación masiva por lotes desde un archivo CSV")
+    p_lote.add_argument("csv_file", metavar="ARCHIVO.csv", help="Ruta al archivo CSV con comprobantes")
+    p_lote.add_argument("--env", choices=["homo", "prod"], default="homo", help="Entorno: 'homo' para testing o 'prod' para legal (default: homo)")
+    p_lote.add_argument("--dry-run", action="store_true", help="Simulación local sin contactar a AFIP")
+    p_lote.add_argument("--pdf", action="store_true", default=True, help="Generar comprobantes en PDF (default: True)")
+    p_lote.add_argument("--duplicado", action="store_true", help="Generar ejemplares duplicados")
+    p_lote.add_argument("--zip", metavar="SALIDA.zip", default=None, help="Empaquetar todos los PDFs en un archivo ZIP")
+
     # --- generar-pdf ---
     p_pdf = sub.add_parser("generar-pdf", help="Generar PDF de un comprobante ya emitido")
     p_pdf.add_argument("--numero", required=True, type=int)
@@ -794,6 +1167,8 @@ def main() -> None:
             cmd_reimprimir(args)
         elif args.comando == "generar-pdf":
             cmd_generar_pdf(args)
+        elif args.comando == "lote":
+            cmd_lote(args)
     except SystemExit:
         raise
     except Exception as e:

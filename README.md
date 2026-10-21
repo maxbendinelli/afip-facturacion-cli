@@ -198,6 +198,27 @@ python3 facturar.py emitir \
   --env prod --pdf
 ```
 
+### Facturación Masiva por Lotes (CSV)
+```bash
+# Simulación previa en local sin contactar a AFIP (Dry-Run):
+python3 facturar.py lote archivo_clientes.csv --dry-run
+
+# Emisión masiva en Producción con PDFs y archivo ZIP consolidado:
+python3 facturar.py lote archivo_clientes.csv --env prod --zip facturas_mes.zip
+```
+
+### Facturación con diferentes tipos de Documento (RG 5616 / AFIP)
+```bash
+# Factura B a receptor con DNI, LE, LC o Pasaporte:
+python3 facturar.py emitir \
+  --tipo B \
+  --cuit-cliente 4250492 \
+  --doc-tipo DNI \
+  --concepto "Servicios de atención permanente" \
+  --monto 3146000 \
+  --env prod --pdf
+```
+
 ### Notas de Crédito y Débito
 ```bash
 python3 facturar.py nota-credito --numero-original 27 --monto 15000 --env prod
