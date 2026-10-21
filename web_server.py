@@ -440,6 +440,18 @@ def get_padron_persona(cuit: str, env: Optional[str] = Query(None)):
     if not ok:
         raise HTTPException(status_code=400, detail=err)
 
+    # El Padrón A13 es una consulta pública de sólo lectura (sin impacto fiscal).
+    # Si hay certificados de producción disponibles, usamos PRODUCCIÓN para obtener nombres reales,
+    # ya que en Homologación (awshomo) AFIP inyecta nombres ficticios/anonimizados de prueba.
+    if env == "prod" or env is None:
+        try:
+            cfg_prod = load_config(env="prod", dry_run=False)
+            datos = buscar_persona(cfg_prod, cuit_clean)
+            if datos:
+                return datos
+        except Exception:
+            pass
+
     target_env = env or os.getenv("AFIP_ENV", "homo").lower()
     try:
         cfg = load_config(env=target_env, dry_run=False)
