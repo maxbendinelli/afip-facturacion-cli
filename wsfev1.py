@@ -43,12 +43,18 @@ def solicitar_cae(config: Config, token: str, sign: str, req: InvoiceRequest) ->
         if imp_neto is None or imp_iva is None:
             if req.items:
                 alics = defaultdict(lambda: {"base": Decimal("0.00"), "iva": Decimal("0.00")})
+                imp_op_ex_items = Decimal("0.00")
                 for it in req.items:
                     alic_id = getattr(it, "alicuota_iva_id", 5)
-                    alics[alic_id]["base"] += it.subtotal
-                    alics[alic_id]["iva"] += it.iva_monto
+                    if alic_id == 3 or getattr(it, "alicuota_iva", Decimal("21.0")) == Decimal("0.0"):
+                        imp_op_ex_items += it.subtotal
+                    else:
+                        alics[alic_id]["base"] += it.subtotal
+                        alics[alic_id]["iva"] += it.iva_monto
                 imp_neto = sum(d["base"] for d in alics.values())
                 imp_iva = sum(d["iva"] for d in alics.values())
+                if imp_op_ex_items > 0 and req.imp_op_ex == 0:
+                    req.imp_op_ex = imp_op_ex_items
                 ivas = [
                     {
                         "Id": alic_id,

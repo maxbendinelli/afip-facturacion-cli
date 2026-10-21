@@ -657,13 +657,19 @@ async function emitirLoteActual() {
     return;
   }
 
-  const dryRun = document.getElementById("chk-lote-dryrun").checked;
-  const duplicado = document.getElementById("chk-lote-duplicado").checked;
-  const env = appConfig ? appConfig.env : "homo";
+  const modo = document.getElementById("select-lote-modo") ? document.getElementById("select-lote-modo").value : "homo";
+  const dryRun = (modo === "dryrun");
+  const env = (modo === "prod") ? "prod" : "homo";
+  const duplicado = document.getElementById("chk-lote-duplicado") ? document.getElementById("chk-lote-duplicado").checked : false;
 
-  const confirmMsg = dryRun
-    ? `¿Desea iniciar la SIMULACIÓN (Dry-Run) del lote de ${currentLoteParsed.rows.length} comprobantes? (No impacta en AFIP)`
-    : `⚠️ ATENCIÓN: Se emitirán ${currentLoteParsed.rows.length} comprobantes REALES en AFIP (${env.toUpperCase()}). ¿Desea continuar?`;
+  let confirmMsg = "";
+  if (modo === "dryrun") {
+    confirmMsg = `🧪 MODO SIMULACIÓN LOCAL (DRY-RUN)\n\n¿Desea iniciar la simulación de ${currentLoteParsed.rows.length} comprobantes?\n\n• NO se contactará a AFIP.\n• No tiene costo ni impacto alguno.\n• Genera comprobantes y PDFs ficticios para previsualizar.`;
+  } else if (modo === "homo") {
+    confirmMsg = `🔬 MODO AFIP HOMOLOGACIÓN (TESTING REAL)\n\n¿Desea emitir el lote de ${currentLoteParsed.rows.length} comprobantes en AFIP HOMOLOGACIÓN?\n\n✓ Servidor de prueba: wswhomo.afip.gov.ar\n✓ Certificados de prueba (Homo)\n✓ Se obtendrán CAEs reales de prueba otorgados por AFIP\n✓ NO TIENE NINGÚN IMPACTO FISCAL NI LEGAL.\n\n¿Desea continuar?`;
+  } else {
+    confirmMsg = `🔴 ATENCIÓN CRÍTICA: MODO PRODUCCIÓN OFICIAL\n\nEstá a punto de emitir ${currentLoteParsed.rows.length} comprobantes en AFIP PRODUCCIÓN.\n\n⚠️ ¡ESTOS COMPROBANTES SON OFICIALES Y TIENEN IMPACTO FISCAL REAL!\n⚠️ No se pueden borrar una vez autorizados por AFIP.\n\n¿Está completamente seguro de continuar con PRODUCCIÓN?`;
+  }
 
   if (!confirm(confirmMsg)) return;
 

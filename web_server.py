@@ -70,14 +70,30 @@ def _last_day_of_month(d: date) -> date:
 
 
 def _parse_doc(raw: str) -> tuple[int, str]:
-    raw_s = str(raw or "").strip().replace("-", "").replace(" ", "")
+    raw_s = str(raw or "").strip().replace("-", "").replace(" ", "").replace(".", "")
     if raw_s.isdigit() and len(raw_s) == 11:
         return 80, raw_s
-    if raw_s.isdigit() and len(raw_s) in (7, 8):
+    if raw_s.isdigit() and 6 <= len(raw_s) <= 8:
         return 96, raw_s
     if raw_s.upper() in ("SIN_CUIT", "0", ""):
         return 99, "0"
     raise ValueError(f"Formato de documento inválido: '{raw}'")
+
+
+def _parse_date_afip(val: Optional[str]) -> Optional[str]:
+    if not val:
+        return None
+    val = val.strip().replace("-", "/")
+    parts = val.split("/")
+    if len(parts) == 3:
+        d, m, y = parts[0].zfill(2), parts[1].zfill(2), parts[2]
+        if len(y) == 4:
+            return f"{y}{m}{d}"
+    clean = re.sub(r"\D", "", val)
+    if len(clean) == 8:
+        return clean
+    return None
+
 
 
 # ── MODELOS DE REQUEST ────────────────────────────────────────────────────────
@@ -157,6 +173,10 @@ class LoteRowIn(BaseModel):
     condicion_iva_receptor: int = 5
     condicion_venta: str = "Contado"
     concepto_afip: int = 2
+    fecha: Optional[str] = None
+    periodo_desde: Optional[str] = None
+    periodo_hasta: Optional[str] = None
+    fecha_vto_pago: Optional[str] = None
 
 
 class LoteEmitirIn(BaseModel):
@@ -630,35 +650,99 @@ async def parse_lote_csv(file: UploadFile = File(...)):
     except UnicodeDecodeError:
         text = raw_bytes.decode("latin-1", errors="replace")
 
-    # Detectar delimitador (, o ;)
-    first_line = text.split("\n", 1)[0]
-    delimiter = ";" if ";" in first_line and first_line.count(";") > first_line.count(",") else ","
+    all_lines = [l for l in text.splitlines() if l.strip()]
+    if not all_lines:
+        raise HTTPException(status_code=400, detail="El archivo CSV está vacío.")
 
-    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+    # Buscar la línea de encabezado si hay metadatos o resumen al inicio
+    header_idx = 0
+    for i, line in enumerate(all_lines[:35]):
+        ll = line.lower()
+        if "destinatario" in ll or "dni/cuit" in ll or "cuit_cliente" in ll or "tipo comp" in ll or "producto o servicio" in ll:
+            header_idx = i
+            break
+        elif "cuit" in ll and "monto" in ll:
+            header_idx = i
+            break
+
+    sub_lines = all_lines[header_idx:]
+    first_line = sub_lines[0]
+    delimiter = ";" if ";" in first_line and first_line.count(";") >= first_line.count(",") else ","
+
+    reader = csv.DictReader(sub_lines, delimiter=delimiter)
     if not reader.fieldnames:
-        raise HTTPException(status_code=400, detail="El archivo CSV está vacío o no contiene encabezados.")
+        raise HTTPException(status_code=400, detail="No se encontraron encabezados válidos en el CSV.")
 
-    # Normalizar nombres de columnas a minúsculas sin espacios
-    normalized_fieldnames = {col: col.strip().lower().replace(" ", "_") for col in reader.fieldnames}
+    # Mapeo de normalización de columnas a formato estándar
+    def _norm_col(col: str) -> str:
+        c = (col or "").strip().lower()
+        c = c.replace(" ", "_").replace(".", "").replace("/", "_").replace("%", "")
+        c = c.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
+        if "destinatario" in c or "apellido_y_nombre" in c:
+            return "nombre_cliente"
+        if "dni" in c or "cuit" in c:
+            return "cuit_cliente"
+        if "producto" in c or "servicio" in c or "concepto" in c or "descripcion" in c:
+            return "concepto"
+        if "tipo_comp" in c or "tipo_comprobante" in c or "tipo" == c:
+            return "tipo"
+        if "total" in c or "importe" in c or "monto" in c:
+            return "monto"
+        if "alic" in c or "alicuota" in c:
+            return "alicuota_iva"
+        if "condicion_frente" in c or "condicion_iva" in c:
+            return "condicion_iva"
+        if "condicion_de_venta" in c:
+            return "condicion_venta"
+        if "emision" in c or "fecha_de_emision" in c:
+            return "fecha"
+        if "vto" in c or "vencimiento" in c:
+            return "fecha_vto_pago"
+        if "desde" in c:
+            return "periodo_desde"
+        if "hasta" in c:
+            return "periodo_hasta"
+        return c
+
+    normalized_fieldnames = {col: _norm_col(col) for col in reader.fieldnames if col}
 
     rows = []
     totales = {"count": 0, "monto": 0.0, "validos": 0, "errores": 0, "tipo_a": 0, "tipo_b": 0, "tipo_c": 0}
 
     for idx, raw_row in enumerate(reader, 1):
-        row = {normalized_fieldnames.get(k, k): v.strip() for k, v in raw_row.items() if k}
-        
-        tipo_str = (row.get("tipo") or row.get("tipo_comprobante") or "C").upper().strip()
-        if tipo_str not in ("A", "B", "C"):
+        # Ignorar filas completamente vacías
+        if not any(v.strip() for v in raw_row.values() if v):
+            continue
+
+        row = {normalized_fieldnames.get(k, k): (v or "").strip() for k, v in raw_row.items() if k}
+
+        # Omitir si la columna FACTURA indica explícitamente NO
+        factura_flag = (raw_row.get("FACTURA") or raw_row.get("factura") or "").strip().upper()
+        if factura_flag == "NO":
+            continue
+
+        dni_field = (row.get("cuit_cliente") or row.get("cuit") or row.get("dni") or "").strip()
+        nombre = (row.get("nombre_cliente") or row.get("cliente") or row.get("razon_social") or "").strip()
+        monto_raw = (row.get("monto") or row.get("importe") or row.get("precio_unitario") or "0").replace("$", "").replace(" ", "")
+
+        if not nombre and not dni_field and monto_raw in ("", "0"):
+            continue
+
+        cuit_raw = dni_field or "SIN_CUIT"
+
+        # Tipo de comprobante (A, B o C)
+        tipo_raw = (row.get("tipo") or "C").upper().strip()
+        if "FACTURA A" in tipo_raw or tipo_raw == "A":
+            tipo_str = "A"
+        elif "FACTURA B" in tipo_raw or tipo_raw == "B":
+            tipo_str = "B"
+        else:
             tipo_str = "C"
 
         cbte_tipo = CBTE_TIPO.get(tipo_str, 11)
-        cuit_raw = (row.get("cuit_cliente") or row.get("cuit") or row.get("dni") or "SIN_CUIT").strip()
-        nombre = (row.get("nombre_cliente") or row.get("cliente") or row.get("razon_social") or "").strip()
-        concepto = (row.get("concepto") or row.get("descripcion") or "Servicios").strip()
+        concepto = (row.get("concepto") or "Servicios").strip()
 
-        # Parsear monto
-        monto_raw = (row.get("monto") or row.get("importe") or row.get("precio_unitario") or "0").replace("$", "").replace(" ", "")
-        # Si usa coma decimal y no punto (formato argentino)
+        # Parsear monto (soporta formatos argentino y estándar)
         if "," in monto_raw and "." in monto_raw:
             monto_raw = monto_raw.replace(".", "").replace(",", ".")
         elif "," in monto_raw and "." not in monto_raw:
@@ -670,18 +754,41 @@ async def parse_lote_csv(file: UploadFile = File(...)):
             monto = 0.0
 
         # Alícuota IVA
-        alic_raw = (row.get("alicuota_iva") or row.get("iva") or ("21" if tipo_str in ("A", "B") else "0")).replace("%", "").strip()
-        try:
-            alic_iva = float(alic_raw)
-        except Exception:
-            alic_iva = 21.0 if tipo_str in ("A", "B") else 0.0
+        alic_raw = (row.get("alicuota_iva") or ("21" if tipo_str in ("A", "B") else "0")).replace("%", "").strip().upper()
+        if "EXENTO" in alic_raw or alic_raw == "0":
+            alic_iva = 0.0
+        elif "10.5" in alic_raw or "10,5" in alic_raw:
+            alic_iva = 10.5
+        elif "27" in alic_raw:
+            alic_iva = 27.0
+        elif "21" in alic_raw:
+            alic_iva = 21.0
+        else:
+            try:
+                alic_iva = float(alic_raw)
+            except Exception:
+                alic_iva = 21.0 if tipo_str in ("A", "B") else 0.0
 
         # Condición IVA
-        cond_raw = (row.get("condicion_iva") or ("RI" if tipo_str == "A" else "CF")).strip()
-        try:
-            cond_id = COND_IVA_ALIAS.get(cond_raw.upper(), int(cond_raw) if cond_raw.isdigit() else 5)
-        except Exception:
-            cond_id = 5
+        cond_raw = (row.get("condicion_iva") or ("RI" if tipo_str == "A" else "CF")).strip().upper()
+        if "RESPONSIBLE" in cond_raw or "INSCRIPTO" in cond_raw:
+            cond_id = 1
+        elif "EXENTO" in cond_raw:
+            cond_id = 4
+        elif "MONOTRIBUT" in cond_raw:
+            cond_id = 6
+        else:
+            try:
+                cond_id = COND_IVA_ALIAS.get(cond_raw, int(cond_raw) if cond_raw.isdigit() else 5)
+            except Exception:
+                cond_id = 5
+
+        # Fechas y condición de venta
+        f_emision = _parse_date_afip(row.get("fecha"))
+        f_vto = _parse_date_afip(row.get("fecha_vto_pago"))
+        f_desde = _parse_date_afip(row.get("periodo_desde"))
+        f_hasta = _parse_date_afip(row.get("periodo_hasta"))
+        cond_venta = (row.get("condicion_venta") or "Contado").strip()
 
         # Validaciones de la fila
         errors = []
@@ -714,8 +821,12 @@ async def parse_lote_csv(file: UploadFile = File(...)):
 
         # Cálculos neto/IVA
         if tipo_str in ("A", "B"):
-            neto = round(monto / (1 + (alic_iva / 100)), 2)
-            iva = round(monto - neto, 2)
+            if alic_iva > 0:
+                neto = round(monto / (1 + (alic_iva / 100)), 2)
+                iva = round(monto - neto, 2)
+            else:
+                neto = monto
+                iva = 0.0
         else:
             neto = monto
             iva = 0.0
@@ -732,7 +843,7 @@ async def parse_lote_csv(file: UploadFile = File(...)):
             totales["validos"] += 1
 
         rows.append({
-            "index": idx,
+            "index": raw_row.get("INDEX") or idx,
             "tipo": tipo_str,
             "cbte_tipo": cbte_tipo,
             "cuit_cliente": cuit_raw,
@@ -745,8 +856,12 @@ async def parse_lote_csv(file: UploadFile = File(...)):
             "iva": iva,
             "alicuota_iva": alic_iva,
             "condicion_iva_receptor": cond_id,
-            "condicion_venta": "Contado",
+            "condicion_venta": cond_venta,
             "concepto_afip": 2,
+            "fecha": f_emision,
+            "periodo_desde": f_desde,
+            "periodo_hasta": f_hasta,
+            "fecha_vto_pago": f_vto,
             "status": status,
             "errors": errors,
             "warnings": warnings,
@@ -788,10 +903,14 @@ def emitir_lote(payload: LoteEmitirIn):
             alic_dec = Decimal(str(item.alicuota_iva)).quantize(Decimal("0.1"))
             alic_id = next((k for k, v in IVA_ALICUOTAS.items() if float(v["porcentaje"]) == item.alicuota_iva), 5)
             
-            # Si es Factura A o B, el precio_unitario es el neto
+            # Si es Factura A o B:
             if item.cbte_tipo in (1, 6):
-                neto_dec = (monto_dec / (Decimal("1.00") + (alic_dec / Decimal("100")))).quantize(Decimal("0.01"))
-                items_obj = [InvoiceItem(descripcion=item.concepto, cantidad=Decimal("1.00"), precio_unitario=neto_dec, alicuota_iva=alic_dec, alicuota_iva_id=alic_id)]
+                if alic_dec == Decimal("0.0"):
+                    neto_dec = monto_dec
+                    items_obj = [InvoiceItem(descripcion=item.concepto, cantidad=Decimal("1.00"), precio_unitario=neto_dec, alicuota_iva=Decimal("0.0"), alicuota_iva_id=3)]
+                else:
+                    neto_dec = (monto_dec / (Decimal("1.00") + (alic_dec / Decimal("100")))).quantize(Decimal("0.01"))
+                    items_obj = [InvoiceItem(descripcion=item.concepto, cantidad=Decimal("1.00"), precio_unitario=neto_dec, alicuota_iva=alic_dec, alicuota_iva_id=alic_id)]
             else:
                 items_obj = [InvoiceItem(descripcion=item.concepto, cantidad=Decimal("1.00"), precio_unitario=monto_dec, alicuota_iva=Decimal("0.0"), alicuota_iva_id=3)]
 
@@ -813,6 +932,20 @@ def emitir_lote(payload: LoteEmitirIn):
             ultimo = get_ultimo_numero(cfg, token, sign, item.cbte_tipo)
             proximo_nro = ultimo + 1
 
+            fecha_emision = item.fecha or hoy
+            try:
+                dt_emision = datetime.strptime(fecha_emision, "%Y%m%d").date()
+                if abs((dt_emision - date.today()).days) > 10:
+                    fecha_emision = hoy
+            except Exception:
+                fecha_emision = hoy
+
+            serv_desde = item.periodo_desde or (hoy[:6] + "01")
+            serv_hasta = item.periodo_hasta or hoy
+            vto_pago = item.fecha_vto_pago or hoy
+            if vto_pago < fecha_emision:
+                vto_pago = fecha_emision
+
             req = InvoiceRequest(
                 cbte_tipo=item.cbte_tipo,
                 cuit_cliente=doc_nro,
@@ -821,14 +954,14 @@ def emitir_lote(payload: LoteEmitirIn):
                 concepto=item.concepto,
                 concepto_afip=item.concepto_afip,
                 numero=proximo_nro,
-                fecha=hoy,
-                fecha_serv_desde=hoy[:6] + "01",
-                fecha_serv_hasta=hoy,
-                fecha_vto_pago=hoy,
+                fecha=fecha_emision,
+                fecha_serv_desde=serv_desde,
+                fecha_serv_hasta=serv_hasta,
+                fecha_vto_pago=vto_pago,
                 doc_tipo=doc_tipo,
                 doc_nro=doc_nro,
                 condicion_iva_receptor=item.condicion_iva_receptor,
-                condicion_venta=item.condicion_venta,
+                condicion_venta=item.condicion_venta or "Contado",
                 items=items_obj,
             )
 

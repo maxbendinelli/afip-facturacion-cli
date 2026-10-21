@@ -397,12 +397,16 @@
             <div class="header-left">
               <h2>Vista Previa del Lote Interpretado</h2>
             </div>
-            <div class="header-actions-flex">
-              <label class="checkbox-label">
-                <input type="checkbox" id="chk-lote-dryrun" checked>
-                <span>Modo Simulación (Dry-Run de prueba)</span>
-              </label>
-              <label class="checkbox-label">
+            <div class="header-actions-flex" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <div class="form-group" style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                <label for="select-lote-modo" style="margin: 0; font-weight: 600; font-size: 0.85rem; color: var(--text-muted); white-space: nowrap;">Modo de Envío:</label>
+                <select id="select-lote-modo" class="form-control" style="width: auto; padding: 6px 12px; font-weight: 500; font-size: 0.85rem; border-radius: 6px; cursor: pointer; background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);">
+                  <option value="homo" selected>🔬 AFIP Homologación (Pruebas reales en AFIP - Sin impacto fiscal)</option>
+                  <option value="dryrun">🧪 Simulación Local (Dry-Run offline - Sin contactar AFIP)</option>
+                  <option value="prod">🔴 AFIP Producción (OFICIAL LEGAL - CAE Real)</option>
+                </select>
+              </div>
+              <label class="checkbox-label" style="margin: 0;">
                 <input type="checkbox" id="chk-lote-duplicado">
                 <span>Generar Duplicados</span>
               </label>
