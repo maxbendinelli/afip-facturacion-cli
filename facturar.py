@@ -173,6 +173,8 @@ def _resolver_nombre(config, doc_tipo: int, doc_nro: str, nombre_arg: str | None
 def cmd_emitir(args) -> None:
     try:
         config = load_config(args.env, args.dry_run)
+        if getattr(args, "cuit_emisor", None):
+            config.cuit = args.cuit_emisor.strip().replace("-", "").replace(" ", "")
     except ConfigError as e:
         _output({"error": str(e)}, 1)
 
@@ -768,6 +770,8 @@ def cmd_lote(args) -> None:
 
     try:
         config = load_config(args.env, args.dry_run)
+        if getattr(args, "cuit_emisor", None):
+            config.cuit = args.cuit_emisor.strip().replace("-", "").replace(" ", "")
     except ConfigError as e:
         _output({"error": str(e)}, 1)
 
@@ -1218,6 +1222,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_emit.add_argument("--dry-run", action="store_true")
     p_emit.add_argument("--pdf", action="store_true", help="Generar PDF")
     p_emit.add_argument("--duplicado", action="store_true", help="PDF con duplicado")
+    p_emit.add_argument("--cuit-emisor", default=None, metavar="CUIT", help="Opcional: sobreescribir el CUIT del emisor para realizar pruebas")
 
     # --- validar-cuit ---
     p_val = sub.add_parser("validar-cuit", help="Validar formato y existencia de un CUIT")
@@ -1284,6 +1289,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_lote.add_argument("--pdf", action="store_true", default=True, help="Generar comprobantes en PDF (default: True)")
     p_lote.add_argument("--duplicado", action="store_true", help="Generar ejemplares duplicados")
     p_lote.add_argument("--zip", metavar="SALIDA.zip", default=None, help="Empaquetar todos los PDFs en un archivo ZIP")
+    p_lote.add_argument("--cuit-emisor", default=None, metavar="CUIT", help="Opcional: sobreescribir el CUIT del emisor para realizar pruebas")
 
     # --- generar-pdf ---
     p_pdf = sub.add_parser("generar-pdf", help="Generar PDF de un comprobante ya emitido")

@@ -1335,8 +1335,11 @@ async function loadConfig() {
     const res = await fetch("/api/config");
     appConfig = await res.json();
 
+    const cuitTag = (appConfig.env === "homo" && appConfig.cuit_homo) 
+      ? `CUIT Prueba: ${appConfig.cuit}` 
+      : `CUIT: ${appConfig.cuit || "--"}`;
     document.getElementById("header-emisor-summary").textContent = 
-      `${appConfig.razon_social || "Emisor no configurado"} (CUIT: ${appConfig.cuit || "--"})`;
+      `${appConfig.razon_social || "Emisor no configurado"} (${cuitTag})`;
     document.getElementById("badge-punto-venta").textContent = `PV: ${String(appConfig.punto_venta).padStart(4, "0")}`;
     
     const envPill = document.getElementById("btn-toggle-env-header");
@@ -1355,7 +1358,11 @@ async function loadConfig() {
     // Rellenar formulario de configuración
     document.getElementById("cfg-env").value = appConfig.env;
     document.getElementById("cfg-punto-venta").value = appConfig.punto_venta;
-    document.getElementById("cfg-cuit").value = appConfig.cuit;
+    document.getElementById("cfg-cuit").value = appConfig.cuit_main || appConfig.cuit || "";
+    const cuitHomoInput = document.getElementById("cfg-cuit-homo");
+    if (cuitHomoInput) {
+      cuitHomoInput.value = appConfig.cuit_homo || "";
+    }
     document.getElementById("cfg-razon-social").value = appConfig.razon_social;
     document.getElementById("cfg-nombre-fantasia").value = appConfig.nombre_fantasia;
     document.getElementById("cfg-domicilio").value = appConfig.domicilio;
@@ -1423,10 +1430,12 @@ function setupConfigForm() {
 }
 
 async function saveConfig() {
+  const cuitHomoEl = document.getElementById("cfg-cuit-homo");
   const payload = {
     env: document.getElementById("cfg-env").value,
     punto_venta: parseInt(document.getElementById("cfg-punto-venta").value),
     cuit: document.getElementById("cfg-cuit").value.trim(),
+    cuit_homo: cuitHomoEl ? cuitHomoEl.value.trim() : "",
     razon_social: document.getElementById("cfg-razon-social").value.trim(),
     nombre_fantasia: document.getElementById("cfg-nombre-fantasia").value.trim(),
     domicilio: document.getElementById("cfg-domicilio").value.trim(),

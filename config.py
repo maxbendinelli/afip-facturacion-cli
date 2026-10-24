@@ -53,14 +53,15 @@ class Config:
         return "https://awshomo.afip.gob.ar/sr-padron/webservices/personaServiceA13?WSDL"
 
 
-def _resolve_cache_path(base: str, env: str) -> str:
-    """Garantiza que el token cache siempre sea específico del entorno (homo/prod)."""
+def _resolve_cache_path(base: str, env: str, cuit: str = "") -> str:
+    """Garantiza que el token cache siempre sea específico del entorno (homo/prod) y del CUIT."""
     path = base.removesuffix(".json")
     for sfx in ("_homo", "_prod"):
         if path.endswith(sfx):
             path = path[: -len(sfx)]
             break
-    return f"{path}_{env}.json"
+    cuit_sfx = f"_{cuit}" if cuit else ""
+    return f"{path}{cuit_sfx}_{env}.json"
 
 
 def load_config(env: str = "homo", dry_run: bool = False) -> Config:
@@ -68,7 +69,14 @@ def load_config(env: str = "homo", dry_run: bool = False) -> Config:
     if env not in ("homo", "prod"):
         raise ConfigError(f"Entorno inválido: '{env}'. Use 'homo' o 'prod'.")
 
-    cuit = os.getenv("AFIP_CUIT", "").strip().replace("-", "").replace(" ", "")
+    env_upper = env.upper()
+
+    # Si se definió un CUIT específico para pruebas/homologación (AFIP_CUIT_HOMO),
+    # o para producción (AFIP_CUIT_PROD), tiene prioridad sobre el CUIT general AFIP_CUIT.
+    cuit = (
+        os.getenv(f"AFIP_CUIT_{env_upper}", "").strip().replace("-", "").replace(" ", "")
+        or os.getenv("AFIP_CUIT", "").strip().replace("-", "").replace(" ", "")
+    )
     if not cuit:
         raise ConfigError("AFIP_CUIT no configurado. Agregue al .env o variable de entorno.")
     if not cuit.isdigit() or len(cuit) != 11:
@@ -113,7 +121,7 @@ def load_config(env: str = "homo", dry_run: bool = False) -> Config:
         cert_path=cert_path,
         key_path=key_path,
         punto_venta=punto_venta,
-        token_cache_path=_resolve_cache_path(os.getenv("AFIP_TOKEN_CACHE_PATH", "./.afip_token_cache"), env),
+        token_cache_path=_resolve_cache_path(os.getenv("AFIP_TOKEN_CACHE_PATH", "./.afip_token_cache"), env, cuit),
         wsdl_cache_path=os.getenv("AFIP_WSDL_CACHE_PATH", "./.afip_wsdl_cache.db"),
         env=env,
         dry_run=dry_run,

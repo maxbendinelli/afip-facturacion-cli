@@ -635,6 +635,15 @@
               <!-- Certificados Homologación -->
               <div class="cert-block">
                 <h3>Ambiente de Homologación (Testing)</h3>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="cfg-cuit-homo">CUIT para Pruebas / Homologación (Opcional)</label>
+                    <input type="text" id="cfg-cuit-homo" placeholder="Ej: 20123456789 (Opcional: sólo se usará en Homologación)">
+                    <small style="color:var(--text-muted); font-size:11px; display:block; margin-top:3px;">
+                      Permite probar con otro CUIT en el ambiente de pruebas sin alterar el CUIT real de Producción. Si se deja vacío, se usa el CUIT principal.
+                    </small>
+                  </div>
+                </div>
                 <div class="form-row form-row-2">
                   <div class="form-group">
                     <div class="cert-label-flex">
@@ -889,6 +898,6 @@
   <!-- TOAST CONTAINER -->
   <div class="toast-container" id="toast-container"></div>
 
-  <script src="/static/app.js?v=20261024_1"></script>
+  <script src="/static/app.js?v=20261024_2"></script>
 </body>
 </html>

@@ -172,6 +172,7 @@ class PreviewSampleIn(BaseModel):
 class ConfigIn(BaseModel):
     env: str
     cuit: str
+    cuit_homo: Optional[str] = ""
     punto_venta: int
     razon_social: Optional[str] = ""
     nombre_fantasia: Optional[str] = ""
@@ -350,9 +351,16 @@ def get_config():
     cert_prod = os.getenv("AFIP_CERT_PATH_PROD", "") or os.getenv("AFIP_CERT_PATH", "")
     key_prod = os.getenv("AFIP_KEY_PATH_PROD", "") or os.getenv("AFIP_KEY_PATH", "")
 
+    cuit_main = os.getenv("AFIP_CUIT", "")
+    cuit_homo = os.getenv("AFIP_CUIT_HOMO", "")
+    cuit_prod = os.getenv("AFIP_CUIT_PROD", "")
+
     return {
         "env": env,
-        "cuit": cfg.cuit if cfg else os.getenv("AFIP_CUIT", ""),
+        "cuit": cfg.cuit if cfg else (cuit_homo if env == "homo" and cuit_homo else cuit_main),
+        "cuit_main": cuit_main,
+        "cuit_homo": cuit_homo,
+        "cuit_prod": cuit_prod,
         "punto_venta": cfg.punto_venta if cfg else int(os.getenv("AFIP_PUNTO_VENTA", "1")),
         "razon_social": cfg.razon_social if cfg else os.getenv("AFIP_RAZON_SOCIAL", ""),
         "nombre_fantasia": cfg.nombre_fantasia if cfg else os.getenv("AFIP_NOMBRE_FANTASIA", ""),
@@ -379,9 +387,13 @@ def get_config():
 @app.post("/api/config")
 def update_config(payload: ConfigIn):
     """Guarda modificaciones en el archivo .env."""
+    cuit_clean = payload.cuit.strip().replace("-", "").replace(" ", "")
+    cuit_homo_clean = (payload.cuit_homo or "").strip().replace("-", "").replace(" ", "")
+
     updates = {
         "AFIP_ENV": payload.env,
-        "AFIP_CUIT": payload.cuit.strip().replace("-", "").replace(" ", ""),
+        "AFIP_CUIT": cuit_clean,
+        "AFIP_CUIT_HOMO": cuit_homo_clean,
         "AFIP_PUNTO_VENTA": str(payload.punto_venta),
         "AFIP_RAZON_SOCIAL": payload.razon_social or "",
         "AFIP_NOMBRE_FANTASIA": payload.nombre_fantasia or "",
