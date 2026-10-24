@@ -261,8 +261,6 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
         f"{resp.punto_venta:05d}  Comp. Nro:  {resp.numero:08d}", 8)
     rline -= 5 * mm
     fecha_txt = _fmt_fecha(resp.fecha)
-    if resp.hora:
-        fecha_txt += f"  {_fmt_hora(resp.hora)} hs."
     _lv(c, pad_r, rline, "Fecha de Emisión:  ", fecha_txt, 8)
     rline -= 5 * mm
     _lv(c, pad_r, rline, "CUIT:  ", _fmt_cuit(config.cuit), 8)
