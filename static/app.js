@@ -537,9 +537,45 @@ function setupModalActions() {
       iframe.contentWindow.print();
     }
   });
+
+  const btnRegenModal = document.getElementById("btn-regenerate-modal");
+  if (btnRegenModal) {
+    btnRegenModal.addEventListener("click", async () => {
+      if (!currentModalCbte || !currentModalCbte.numero) {
+        showToast("Este comprobante de prueba no requiere regeneración.", "info");
+        return;
+      }
+      showToast("Regenerando PDF con el logo y diseño actual...", "info");
+      try {
+        const res = await fetch("/api/comprobantes/reimprimir", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            cbte_tipo: currentModalCbte.cbte_tipo || (currentModalCbte.tipo === "A" ? 1 : (currentModalCbte.tipo === "B" ? 6 : 11)),
+            numero: currentModalCbte.numero,
+            punto_venta: currentModalCbte.punto_venta || 4,
+            duplicado: false,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Error reimprimiendo comprobante");
+
+        const iframe = document.getElementById("pdf-viewer-frame");
+        const pdfUrl = `/api/pdf/${data.pdf_filename}?t=${Date.now()}`;
+        iframe.src = pdfUrl;
+        document.getElementById("btn-download-pdf").href = pdfUrl;
+        showToast("¡PDF actualizado con el nuevo diseño y logo!", "success");
+      } catch (err) {
+        showToast(`Error: ${err.message}`, "error");
+      }
+    });
+  }
 }
 
+let currentModalCbte = null;
+
 function openPdfModal(cbteData) {
+  currentModalCbte = cbteData;
   const modal = document.getElementById("modal-pdf");
   const title = document.getElementById("modal-pdf-title");
   const subtitle = document.getElementById("modal-pdf-subtitle");
@@ -941,7 +977,8 @@ function setupPdfCustomization() {
 
       logoPathInput.value = `./${data.path}`;
       logoPreviewBox.innerHTML = `<img src="${data.url}" alt="Logo preview">`;
-      showToast("Logo subido correctamente.", "success");
+      try { await saveConfig(); } catch (e) {}
+      showToast("Logo subido y guardado correctamente.", "success");
     } catch (err) {
       showToast(`Error subiendo logo: ${err.message}`, "error");
     }
@@ -960,7 +997,8 @@ function setupPdfCustomization() {
       if (!res.ok) throw new Error(data.detail);
 
       wmPathInput.value = `./${data.path}`;
-      showToast("Imagen de marca de agua subida.", "success");
+      try { await saveConfig(); } catch (e) {}
+      showToast("Imagen de marca de agua subida y guardada.", "success");
     } catch (err) {
       showToast(`Error subiendo watermark: ${err.message}`, "error");
     }
@@ -970,7 +1008,22 @@ function setupPdfCustomization() {
   document.getElementById("btn-preview-sample-pdf").addEventListener("click", async () => {
     showToast("Generando factura de prueba con el diseño actual...", "info");
     try {
-      const res = await fetch("/api/pdf/preview-sample", { method: "POST" });
+      const payload = {
+        logo_path: document.getElementById("cfg-logo-path").value.trim(),
+        ingresos_brutos: document.getElementById("cfg-ingresos-brutos").value.trim(),
+        razon_social: document.getElementById("cfg-razon-social").value.trim(),
+        domicilio: document.getElementById("cfg-domicilio").value.trim(),
+        condicion_iva_emisor: document.getElementById("cfg-cond-iva-emisor").value,
+        inicio_actividades: document.getElementById("cfg-inicio-actividades").value.trim(),
+        leyenda: document.getElementById("cfg-leyenda").value.trim(),
+        watermark_text: document.getElementById("cfg-watermark-text").value.trim(),
+        watermark_image: document.getElementById("cfg-watermark-image").value.trim(),
+      };
+      const res = await fetch("/api/pdf/preview-sample", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail);
 

@@ -154,6 +154,18 @@ class EmitirIn(BaseModel):
     dry_run: bool = False
 
 
+class PreviewSampleIn(BaseModel):
+    razon_social: Optional[str] = None
+    domicilio: Optional[str] = None
+    condicion_iva_emisor: Optional[str] = None
+    logo_path: Optional[str] = None
+    ingresos_brutos: Optional[str] = None
+    inicio_actividades: Optional[str] = None
+    leyenda: Optional[str] = None
+    watermark_text: Optional[str] = None
+    watermark_image: Optional[str] = None
+
+
 class ConfigIn(BaseModel):
     env: str
     cuit: str
@@ -1184,12 +1196,32 @@ def download_lote_zip(lote_id: str):
 
 
 @app.post("/api/pdf/preview-sample")
-def preview_sample_pdf():
+def preview_sample_pdf(payload: Optional[PreviewSampleIn] = None):
     """Genera un comprobante de prueba de ejemplo con el logo, watermark y leyenda configurados."""
     try:
         cfg = load_config(env="homo", dry_run=True)
     except Exception:
         cfg = Config(cuit="23255684779", cert_path="", key_path="", punto_venta=4, token_cache_path="", wsdl_cache_path="", env="homo", dry_run=True)
+
+    if payload:
+        if payload.razon_social is not None:
+            cfg.razon_social = payload.razon_social
+        if payload.domicilio is not None:
+            cfg.domicilio = payload.domicilio
+        if payload.condicion_iva_emisor is not None:
+            cfg.condicion_iva_emisor = payload.condicion_iva_emisor
+        if payload.logo_path is not None:
+            cfg.logo_path = payload.logo_path
+        if payload.ingresos_brutos is not None:
+            cfg.ingresos_brutos = payload.ingresos_brutos
+        if payload.inicio_actividades is not None:
+            cfg.inicio_actividades = payload.inicio_actividades
+        if payload.leyenda is not None:
+            cfg.leyenda = payload.leyenda
+        if payload.watermark_text is not None:
+            cfg.watermark_text = payload.watermark_text
+        if payload.watermark_image is not None:
+            cfg.watermark_image = payload.watermark_image
 
     items = [
         InvoiceItem(descripcion="Servicio de Desarrollo de Software y APIs", cantidad=Decimal("1.00"), precio_unitario=Decimal("85000.00"), alicuota_iva=Decimal("21.0"), alicuota_iva_id=5),

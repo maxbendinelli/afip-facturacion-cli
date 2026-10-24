@@ -127,12 +127,13 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
         c.drawCentredString(0, 0, config.watermark_text.upper())
         c.restoreState()
 
-    if config.watermark_image and os.path.isfile(config.watermark_image):
+    wm_file = _resolve_image_path(config.watermark_image)
+    if wm_file:
         c.saveState()
         try:
             wm_w = 90 * mm
             wm_h = 90 * mm
-            c.drawImage(config.watermark_image, (PAGE_W - wm_w) / 2, (PAGE_H - wm_h) / 2,
+            c.drawImage(wm_file, (PAGE_W - wm_w) / 2, (PAGE_H - wm_h) / 2,
                         width=wm_w, height=wm_h, mask='auto', preserveAspectRatio=True)
         except Exception:
             pass
@@ -181,25 +182,44 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
 
     # Columna izquierda: Logo y/o Razón Social
     pad_l = left_x + 3 * mm
-    has_logo = bool(config.logo_path and os.path.isfile(config.logo_path))
+    logo_file = _resolve_image_path(config.logo_path)
+    has_logo = bool(logo_file and os.path.isfile(logo_file))
 
     if has_logo:
+        drawn = False
+        logo_max_w = LEFT_W - 8 * mm
+        logo_max_h = 16 * mm
         try:
-            logo_max_w = LEFT_W - 8 * mm
-            logo_max_h = 14 * mm
             c.drawImage(
-                config.logo_path,
+                logo_file,
                 left_x + 4 * mm,
-                y - 16 * mm,
+                y - 18 * mm,
                 width=logo_max_w,
                 height=logo_max_h,
                 preserveAspectRatio=True,
                 anchor='c',
                 mask='auto'
             )
-            c.setFont("Helvetica-Bold", 9)
-            c.drawCentredString(left_x + LEFT_W / 2, y - 20 * mm, razon)
+            drawn = True
         except Exception:
+            try:
+                c.drawImage(
+                    logo_file,
+                    left_x + 4 * mm,
+                    y - 18 * mm,
+                    width=logo_max_w,
+                    height=logo_max_h,
+                    preserveAspectRatio=True,
+                    anchor='c'
+                )
+                drawn = True
+            except Exception:
+                drawn = False
+
+        if drawn:
+            c.setFont("Helvetica-Bold", 8.5)
+            c.drawCentredString(left_x + LEFT_W / 2, y - 22 * mm, razon)
+        else:
             c.setFont("Helvetica-Bold", 11)
             c.drawCentredString(left_x + LEFT_W / 2, y - 8 * mm, razon)
     else:
@@ -536,6 +556,32 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
     c.drawString(MARGIN, y - qr_size - 7.5 * mm,
                  "Esta Agencia no se responsabiliza por los datos ingresados en el detalle de la operación")
 
+
+
+def _resolve_image_path(p: str | None) -> str | None:
+    if not p:
+        return None
+    p = str(p).strip().strip('"').strip("'")
+    if not p:
+        return None
+    # Translate Windows path (e.g. C:\... or C:/...) to WSL (/mnt/c/...)
+    if len(p) >= 2 and p[1] == ":" and p[0].isalpha():
+        drive = p[0].lower()
+        subpath = p[2:].replace("\\", "/").lstrip("/")
+        wsl_path = f"/mnt/{drive}/{subpath}"
+        if os.path.isfile(wsl_path):
+            return wsl_path
+    if os.path.isfile(p):
+        return os.path.abspath(p)
+    base_dir = Path(__file__).resolve().parent
+    rel_p = base_dir / p
+    if rel_p.is_file():
+        return str(rel_p.resolve())
+    if p.startswith("./") or p.startswith(".\\"):
+        alt = base_dir / p[2:]
+        if alt.is_file():
+            return str(alt.resolve())
+    return None
 
 def generate_pdf(config: Config, resp: InvoiceResponse, output_path: str,
                  duplicado: bool = False) -> str:
