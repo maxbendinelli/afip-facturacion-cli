@@ -252,10 +252,40 @@ def cmd_emitir(args) -> None:
         _output({"error": "Debe proveer --concepto o al menos un --item."}, 1)
 
     if args.dry_run:
+        from models import InvoiceResponse
+        from pdf_generator import generate_pdf
+        cbte_tipo = CBTE_TIPO.get(getattr(args, "tipo", "C").upper(), 11)
+        letra = getattr(args, "tipo", "C").upper()
+        pdf_path = None
+        if args.pdf:
+            pdf_path = f"comprobante_{letra.lower()}_{config.punto_venta:04d}_simulado.pdf"
+            resp_sim = InvoiceResponse(
+                cae="SIMULADO_CAE_123456",
+                cae_vencimiento=(date.today() + timedelta(days=10)).strftime("%Y%m%d"),
+                numero=9999,
+                cbte_tipo=cbte_tipo,
+                punto_venta=config.punto_venta,
+                fecha=fecha,
+                monto=monto,
+                nombre_cliente=nombre_cliente,
+                cuit_cliente=doc_nro,
+                resultado="A",
+                doc_tipo=doc_tipo,
+                condicion_iva_receptor=condicion_iva,
+                condicion_venta=condicion_venta or "Contado",
+                periodo_desde=periodo_desde,
+                periodo_hasta=periodo_hasta,
+                fecha_vto_pago=fecha_vto_pago_pdf,
+                hora=datetime.now().strftime("%H%M%S"),
+                items=items,
+            )
+            generate_pdf(config, resp_sim, pdf_path, duplicado=args.duplicado)
+
         _output({
             "status": "dry-run-ok",
+            "pdf": pdf_path,
             "fields": {
-                "cbte_tipo": CBTE_TIPO.get(getattr(args, "tipo", "C").upper(), 11),
+                "cbte_tipo": cbte_tipo,
                 "cuit_emisor": config.cuit,
                 "punto_venta": config.punto_venta,
                 "doc_tipo": doc_tipo,
@@ -541,6 +571,7 @@ def cmd_consultar(args) -> None:
     # Generar PDF
     from pdf_generator import generate_pdf
     from models import InvoiceResponse
+    from models import InvoiceResponse
 
     resp = InvoiceResponse(
         cae=data["cae"],
@@ -569,6 +600,7 @@ def cmd_consultar(args) -> None:
 
 def cmd_reimprimir(args) -> None:
     from pdf_generator import generate_pdf
+    from models import InvoiceResponse
     from models import InvoiceResponse
 
     try:
@@ -634,6 +666,7 @@ def cmd_reimprimir(args) -> None:
 def cmd_generar_pdf(args) -> None:
     from pdf_generator import generate_pdf
     from models import InvoiceResponse
+    from models import InvoiceResponse
 
     try:
         config = load_config(args.env, dry_run=True)
@@ -695,6 +728,7 @@ def cmd_lote(args) -> None:
     from wsfev1 import get_ultimo_comprobante_info, solicitar_cae
     from wsaa import get_token_sign
     from pdf_generator import generate_pdf
+    from models import InvoiceResponse
 
     csv_path = Path(args.csv_file)
     if not csv_path.exists():
@@ -838,7 +872,22 @@ def cmd_lote(args) -> None:
             "ya_emitido": bool(exist_info),
         })
 
-    sys.stderr.write(f"\n📦 Lote cargado: {len(parsed_rows)} comprobantes interpretados.\n")
+    hoy_dt = date.today()
+
+    # Ordenar cronológicamente por fecha de emisión para respetar la regla de AFIP (CbteFch_N >= CbteFch_{N-1})
+    def _row_date_key_cli(r):
+        f = r.get("fecha") or hoy_dt.strftime("%Y%m%d")
+        f_clean = str(f).replace("-", "").replace("/", "")
+        idx = r.get("index") or 0
+        try:
+            idx_num = int(idx)
+        except Exception:
+            idx_num = 0
+        return (f_clean, idx_num)
+
+    parsed_rows = sorted(parsed_rows, key=_row_date_key_cli)
+
+    sys.stderr.write(f"\n📦 Lote cargado: {len(parsed_rows)} comprobantes interpretados y ordenados cronológicamente.\n")
     ya_emitidos = sum(1 for r in parsed_rows if r["ya_emitido"])
     if ya_emitidos > 0:
         sys.stderr.write(f"ℹ️  {ya_emitidos} comprobantes ya fueron emitidos previamente y se omitirán para no duplicar.\n")
@@ -891,17 +940,55 @@ def cmd_lote(args) -> None:
                 items_obj = [InvoiceItem(descripcion=item["concepto"], cantidad=Decimal("1.00"), precio_unitario=monto_dec, alicuota_iva=Decimal("0.0"), alicuota_iva_id=3)]
 
             if config.dry_run:
+                pv = config.punto_venta or 4
+                letra = "A" if item["cbte_tipo"] == 1 else ("B" if item["cbte_tipo"] == 6 else "C")
+                pdf_name = f"comprobante_{letra.lower()}_{pv:04d}_sim_{item['index']:04d}.pdf"
+                pdf_path = comprobantes_dir / pdf_name
+
+                serv_desde = item.get("periodo_desde") or (hoy_dt.strftime("%Y%m") + "01")
+                serv_hasta = item.get("periodo_hasta") or hoy_dt.strftime("%Y%m%d")
+                vto_pago = item.get("fecha_vto_pago") or item.get("fecha") or hoy_dt.strftime("%Y%m%d")
+
+                resp_sim = InvoiceResponse(
+                    cae="SIMULADO_CAE_123456",
+                    cae_vencimiento=(hoy_dt + timedelta(days=10)).strftime("%Y%m%d"),
+                    numero=int(item["index"]) if str(item["index"]).isdigit() else 9999,
+                    cbte_tipo=item["cbte_tipo"],
+                    punto_venta=pv,
+                    fecha=item.get("fecha") or hoy_dt.strftime("%Y%m%d"),
+                    monto=monto_dec,
+                    nombre_cliente=item["nombre_cliente"],
+                    cuit_cliente=item["doc_nro"],
+                    resultado="A",
+                    doc_tipo=item["doc_tipo"],
+                    condicion_iva_receptor=item["condicion_iva_receptor"],
+                    condicion_venta=item["condicion_venta"],
+                    periodo_desde=serv_desde,
+                    periodo_hasta=serv_hasta,
+                    hora=datetime.now().strftime("%H%M%S"),
+                    fecha_vto_pago=vto_pago,
+                    items=items_obj,
+                    imp_neto=monto_dec if item["cbte_tipo"] not in (1, 6) or alic_dec == Decimal("0.0") else neto_dec,
+                    imp_iva=Decimal("0.00") if item["cbte_tipo"] not in (1, 6) or alic_dec == Decimal("0.0") else (monto_dec - neto_dec),
+                )
+
+                if args.pdf:
+                    generate_pdf(config, resp_sim, str(pdf_path), duplicado=args.duplicado)
+                    generated_pdfs.append(pdf_path)
+
                 resultados.append({
                     "index": item["index"],
                     "status": "ok",
+                    "modo": "simulacion",
                     "tipo": item["tipo"],
-                    "comprobante": f"SIM-{item['index']:04d}",
-                    "cae": "SIMULADO_123456",
+                    "comprobante": f"{pv:04d}-SIM{item['index']:04d}",
+                    "cae": "SIMULADO_CAE_123456",
                     "monto": str(monto_dec),
                     "cliente": item["nombre_cliente"],
+                    "pdf": str(pdf_path) if args.pdf else None,
                 })
                 exitosos += 1
-                sys.stderr.write(f"  [DRY-RUN] #{item['index']} {item['tipo']} {item['nombre_cliente']} -> $ {monto_dec:,.2f}\n")
+                sys.stderr.write(f"  [DRY-RUN] #{item['index']} {item['tipo']} {item['nombre_cliente']} -> $ {monto_dec:,.2f} (PDF: {pdf_name})\n")
                 continue
 
             cbte_tipo = item["cbte_tipo"]

@@ -83,7 +83,7 @@ def _build_qr_url(config: Config, resp: InvoiceResponse) -> str:
         "tipoDocRec": resp.doc_tipo,
         "nroDocRec": int(resp.cuit_cliente) if str(resp.cuit_cliente).isdigit() else 0,
         "tipoCodAut": "E",
-        "codAut": int(resp.cae),
+        "codAut": int(resp.cae) if str(resp.cae).isdigit() else 74251829304918,
     }
     b64 = base64.b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode()
     return f"https://www.afip.gob.ar/fe/qr/?p={b64}"

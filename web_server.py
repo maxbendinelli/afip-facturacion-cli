@@ -611,16 +611,48 @@ def emitir_comprobante(payload: EmitirIn):
         concepto_desc = "Servicios profesionales"
 
     if payload.dry_run:
+        pv = cfg.punto_venta or 4
+        letra = CBTE_LETRA.get(payload.cbte_tipo, "C").lower()
+        sim_num = 9999
+        pdf_name = f"comprobante_{letra}_{pv:04d}_sim_{sim_num:04d}.pdf"
+        pdf_path = COMPROBANTES_DIR / pdf_name
+        resp_sim = InvoiceResponse(
+            cae="SIMULADO_CAE_123456",
+            cae_vencimiento=(hoy + timedelta(days=10)).strftime("%Y%m%d"),
+            numero=sim_num,
+            cbte_tipo=payload.cbte_tipo,
+            punto_venta=pv,
+            fecha=fecha,
+            monto=monto,
+            nombre_cliente=nombre_cliente,
+            cuit_cliente=doc_nro,
+            resultado="A",
+            doc_tipo=doc_tipo,
+            condicion_iva_receptor=condicion_iva,
+            condicion_venta=payload.condicion_venta or "Contado",
+            periodo_desde=periodo_desde if payload.concepto_afip in (2, 3) else None,
+            periodo_hasta=periodo_hasta if payload.concepto_afip in (2, 3) else None,
+            fecha_vto_pago=fecha_vto_pago_pdf,
+            hora=datetime.now().strftime("%H%M%S"),
+            items=items_list,
+        )
+        generate_pdf(cfg, resp_sim, str(pdf_path), duplicado=payload.duplicado)
         return {
-            "status": "dry-run-ok",
+            "status": "ok",
+            "modo": "simulacion",
             "cbte_tipo": payload.cbte_tipo,
             "tipo_nombre": CBTE_NOMBRE.get(payload.cbte_tipo),
+            "comprobante": f"{pv:04d}-SIM{sim_num:04d}",
+            "cae": "SIMULADO_CAE_123456",
+            "cae_vencimiento": (hoy + timedelta(days=10)).strftime("%Y%m%d"),
             "monto": str(monto),
             "cliente": nombre_cliente,
             "cuit_cliente": doc_nro,
             "doc_tipo": doc_tipo,
             "condicion_iva_receptor": condicion_iva,
             "env": target_env,
+            "pdf_filename": pdf_name,
+            "url": f"/api/pdf/{pdf_name}",
         }
 
     token, sign = get_token_sign(cfg)
@@ -1002,7 +1034,19 @@ def emitir_lote(payload: LoteEmitirIn):
     min_permitida = hoy_dt - timedelta(days=10)
     max_permitida = hoy_dt + timedelta(days=10)
 
-    for item in payload.rows:
+    # Ordenar cronológicamente por fecha de emisión para respetar la regla de AFIP (CbteFch_N >= CbteFch_{N-1})
+    def _row_date_key(it):
+        f = getattr(it, "fecha", None) or hoy_dt.strftime("%Y%m%d")
+        f_clean = str(f).replace("-", "").replace("/", "")
+        try:
+            idx_num = int(getattr(it, "index", 0))
+        except Exception:
+            idx_num = 0
+        return (f_clean, idx_num)
+
+    sorted_rows = sorted(payload.rows, key=_row_date_key)
+
+    for item in sorted_rows:
         # Si ya fue autorizado con éxito, no duplicar emisión
         if item.cae and str(item.cae).strip() and not payload.dry_run:
             resultados.append({
@@ -1038,15 +1082,57 @@ def emitir_lote(payload: LoteEmitirIn):
                 items_obj = [InvoiceItem(descripcion=item.concepto, cantidad=Decimal("1.00"), precio_unitario=monto_dec, alicuota_iva=Decimal("0.0"), alicuota_iva_id=3)]
 
             if payload.dry_run:
+                pv = cfg.punto_venta or 4
+                letra = CBTE_LETRA.get(item.cbte_tipo, "C").lower()
+                pdf_name = f"comprobante_{letra}_{pv:04d}_sim_{item.index:04d}.pdf"
+                pdf_path = COMPROBANTES_DIR / pdf_name
+
+                # Generar comprobante PDF simulado de prueba
+                serv_desde = item.periodo_desde or (hoy[:6] + "01")
+                serv_hasta = item.periodo_hasta or hoy
+                vto_pago = item.fecha_vto_pago or (item.fecha or hoy)
+
+                resp_sim = InvoiceResponse(
+                    cae="SIMULADO_CAE_123456",
+                    cae_vencimiento=(hoy_dt + timedelta(days=10)).strftime("%Y%m%d"),
+                    numero=int(item.index) if str(item.index).isdigit() else 9999,
+                    cbte_tipo=item.cbte_tipo,
+                    punto_venta=pv,
+                    fecha=item.fecha or hoy,
+                    monto=monto_dec,
+                    nombre_cliente=item.nombre_cliente,
+                    cuit_cliente=doc_nro,
+                    resultado="A",
+                    doc_tipo=doc_tipo,
+                    condicion_iva_receptor=item.condicion_iva_receptor,
+                    condicion_venta=item.condicion_venta or "Contado",
+                    periodo_desde=serv_desde,
+                    periodo_hasta=serv_hasta,
+                    hora=datetime.now().strftime("%H%M%S"),
+                    fecha_vto_pago=vto_pago,
+                    items=items_obj,
+                    imp_neto=monto_dec if item.cbte_tipo not in (1, 6) or alic_dec == Decimal("0.0") else neto_dec,
+                    imp_iva=Decimal("0.00") if item.cbte_tipo not in (1, 6) or alic_dec == Decimal("0.0") else (monto_dec - neto_dec),
+                )
+                generate_pdf(cfg, resp_sim, str(pdf_path), duplicado=payload.duplicado)
+
+                resp_dict = resp_sim.to_json()
+                resp_dict["pdf_filename"] = pdf_name
+                with open(COMPROBANTES_DIR / f"comprobante_{letra}_{pv:04d}_sim_{item.index:04d}.json", "w", encoding="utf-8") as f:
+                    json.dump(resp_dict, f, ensure_ascii=False)
+
                 resultados.append({
                     "index": item.index,
                     "status": "ok",
                     "modo": "simulacion",
                     "tipo": item.tipo,
-                    "comprobante": f"SIM-{item.index:04d}",
+                    "comprobante": f"{pv:04d}-SIM{item.index:04d}",
                     "cae": "SIMULADO_CAE_123456",
+                    "cae_vencimiento": (hoy_dt + timedelta(days=10)).strftime("%Y%m%d"),
                     "monto": str(monto_dec),
                     "cliente": item.nombre_cliente,
+                    "pdf_filename": pdf_name,
+                    "url": f"/api/pdf/{pdf_name}",
                 })
                 exitosos += 1
                 continue

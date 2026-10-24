@@ -503,7 +503,8 @@ async function emitirFactura() {
     if (!res.ok) throw new Error(data.detail || "Error al emitir comprobante");
 
     if (payload.dry_run) {
-      showToast("Simulación exitosa: Parámetros validados correctamente.", "success");
+      showToast("Simulación exitosa (Dry-Run): PDF de prueba generado.", "success");
+      openPdfModal(data);
       return;
     }
 
@@ -827,9 +828,20 @@ async function emitirLoteActual() {
       }
     });
 
-    if (data.exitosos > 0 && !dryRun) {
+    if (data.exitosos > 0) {
       const zipBtn = document.getElementById("btn-download-lote-zip");
       zipBtn.href = `/api/lotes/download-zip/${data.lote_id}`;
+      if (dryRun) {
+        zipBtn.innerHTML = `
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          Descargar Lote Simulado (ZIP)
+        `;
+      } else {
+        zipBtn.innerHTML = `
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          Descargar Todos los Comprobantes (ZIP)
+        `;
+      }
       document.getElementById("lote-final-actions").classList.remove("hidden");
     }
 
