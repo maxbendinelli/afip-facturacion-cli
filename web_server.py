@@ -477,6 +477,22 @@ def get_padron_persona(cuit: str, env: Optional[str] = Query(None)):
         raise HTTPException(status_code=500, detail=f"Error consultando padrón: {e}")
 
 
+def _format_afip_error(e: Exception) -> str:
+    """Traduce errores crudos de AFIP / WSAA a mensajes claros y accionables."""
+    msg = str(e)
+    if "Computador no autorizado a acceder al servicio" in msg:
+        return (
+            "Error de autorización AFIP (WSAA): 'Computador no autorizado a acceder al servicio'.\n"
+            "Causas y solución:\n"
+            "1) En el sitio web de AFIP con Clave Fiscal ('Administrador de Relaciones de Clave Fiscal'), falta delegar/vincular el Alias de su certificado al servicio 'Facturación Electrónica' (wsfe).\n"
+            "2) El CUIT en el archivo .env no coincide con el CUIT para el que se emitió el certificado digital (.crt).\n"
+            "3) Si el certificado fue tramitado en PRODUCCIÓN, verifique tener AFIP_ENV=prod en el .env (los certificados de producción son rechazados en homologación y viceversa)."
+        )
+    if "El CEE ya posee comprobantes asociados" in msg:
+        return f"Error AFIP: {msg}"
+    return f"Error en servicio AFIP: {msg}"
+
+
 @app.get("/api/comprobantes/ultimo/{cbte_tipo}")
 def get_ultimo_cbte(cbte_tipo: int, env: Optional[str] = Query(None)):
     """Obtiene el último número autorizado en AFIP para un tipo de comprobante."""
@@ -495,7 +511,13 @@ def get_ultimo_cbte(cbte_tipo: int, env: Optional[str] = Query(None)):
             "env": target_env,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {
+            "status": "warning",
+            "detail": _format_afip_error(e),
+            "cbte_tipo": cbte_tipo,
+            "punto_venta": getattr(cfg, "punto_venta", 4) if "cfg" in locals() else 4,
+            "env": target_env,
+        }
 
 
 # ── EMISIÓN INDIVIDUAL ────────────────────────────────────────────────────────
@@ -669,8 +691,11 @@ def emitir_comprobante(payload: EmitirIn):
             "url": f"/api/pdf/{pdf_name}",
         }
 
-    token, sign = get_token_sign(cfg)
-    ultimo = get_ultimo_numero(cfg, token, sign, payload.cbte_tipo)
+    try:
+        token, sign = get_token_sign(cfg)
+        ultimo = get_ultimo_numero(cfg, token, sign, payload.cbte_tipo)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=_format_afip_error(e))
     proximo_nro = ultimo + 1
 
     req = InvoiceRequest(
@@ -1037,7 +1062,10 @@ def emitir_lote(payload: LoteEmitirIn):
 
     token, sign = (None, None)
     if not payload.dry_run:
-        token, sign = get_token_sign(cfg)
+        try:
+            token, sign = get_token_sign(cfg)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=_format_afip_error(e))
 
     lote_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     resultados = []
@@ -1385,7 +1413,7 @@ def get_comprobante_afip(cbte_tipo: int, numero: int, env: Optional[str] = Query
         data["letra"] = CBTE_LETRA.get(cbte_tipo, "C")
         return data
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error consultando comprobante en AFIP: {e}")
+        raise HTTPException(status_code=500, detail=_format_afip_error(e))
 
 
 @app.get("/api/comprobantes/historial")
