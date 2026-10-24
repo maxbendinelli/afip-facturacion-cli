@@ -289,7 +289,7 @@
                     <tr>
                       <th class="th-desc">Descripción</th>
                       <th class="th-qty">Cant.</th>
-                      <th class="th-price">Precio Unit. ($)</th>
+                      <th class="th-price" id="th-price-col">Precio Unit. ($)</th>
                       <th class="th-iva" id="th-iva-col">Alícuota IVA</th>
                       <th class="th-subtotal">Subtotal ($)</th>
                       <th class="th-actions"></th>
@@ -310,11 +310,11 @@
             </div>
             <div class="card-body">
               <div class="summary-line">
-                <span>Subtotal Neto:</span>
+                <span id="summary-subtotal-label">Subtotal Neto:</span>
                 <strong id="summary-subtotal">$ 0,00</strong>
               </div>
               <div class="summary-line" id="summary-iva-row">
-                <span>IVA Total:</span>
+                <span id="summary-iva-label">IVA Total:</span>
                 <strong id="summary-iva">$ 0,00</strong>
               </div>
               <div class="summary-breakdown" id="summary-iva-breakdown"></div>

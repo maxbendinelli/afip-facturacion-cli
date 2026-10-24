@@ -61,8 +61,10 @@ def get_ultimo_numero(config: Config, token: str, sign: str, cbte_tipo: int) -> 
 def solicitar_cae(config: Config, token: str, sign: str, req: InvoiceRequest) -> InvoiceResponse:
     client = _build_client(config)
 
-    # Comprobantes tipo A (1, 2, 3, 4) y B (6, 7, 8, 9) discriminan/calculan IVA
+    # Comprobantes tipo A (1, 2, 3, 4) y B (6, 7, 8, 9) calculan IVA ante AFIP
     is_iva_discriminated = req.cbte_tipo in (1, 2, 3, 4, 6, 7, 8, 9)
+    es_tipo_a = req.cbte_tipo in (1, 2, 3, 4)
+    es_tipo_b = req.cbte_tipo in (6, 7, 8, 9)
 
     imp_neto = req.imp_neto
     imp_iva = req.imp_iva
@@ -73,17 +75,49 @@ def solicitar_cae(config: Config, token: str, sign: str, req: InvoiceRequest) ->
             if req.items:
                 alics = defaultdict(lambda: {"base": Decimal("0.00"), "iva": Decimal("0.00")})
                 imp_op_ex_items = Decimal("0.00")
-                for it in req.items:
-                    alic_id = getattr(it, "alicuota_iva_id", 5)
-                    if alic_id == 3 or getattr(it, "alicuota_iva", Decimal("21.0")) == Decimal("0.0"):
-                        imp_op_ex_items += it.subtotal
-                    else:
-                        alics[alic_id]["base"] += it.subtotal
-                        alics[alic_id]["iva"] += it.iva_monto
-                imp_neto = sum(d["base"] for d in alics.values())
-                imp_iva = sum(d["iva"] for d in alics.values())
+
+                if es_tipo_a:
+                    # En Factura A, los precios ingresados son NETOS GRAVADOS (sin IVA).
+                    # El IVA se calcula y se suma sobre el precio neto.
+                    for it in req.items:
+                        alic_id = getattr(it, "alicuota_iva_id", 5)
+                        alic_val = getattr(it, "alicuota_iva", Decimal("21.0"))
+                        if alic_id == 3 or alic_val == Decimal("0.0"):
+                            imp_op_ex_items += it.subtotal
+                        else:
+                            alics[alic_id]["base"] += it.subtotal
+                            alics[alic_id]["iva"] += it.iva_monto
+                    imp_neto = sum(d["base"] for d in alics.values())
+                    imp_iva = sum(d["iva"] for d in alics.values())
+                    imp_total = imp_neto + imp_iva + req.imp_trib + req.imp_op_ex + req.imp_tot_conc
+                else:
+                    # En Factura B, los precios ingresados son FINALES con IVA incluido.
+                    # El total a pagar es la suma de los ítems. El IVA se desglosa internamente para AFIP.
+                    items_by_alic = defaultdict(lambda: {"total": Decimal("0.00"), "porc": Decimal("21.0")})
+                    for it in req.items:
+                        alic_id = getattr(it, "alicuota_iva_id", 5)
+                        alic_val = getattr(it, "alicuota_iva", Decimal("21.0"))
+                        if alic_id == 3 or alic_val == Decimal("0.0"):
+                            imp_op_ex_items += it.subtotal
+                        else:
+                            items_by_alic[alic_id]["total"] += it.subtotal
+                            items_by_alic[alic_id]["porc"] = alic_val
+
+                    for alic_id, data in items_by_alic.items():
+                        tot_alic = data["total"]
+                        factor = Decimal("1.00") + (data["porc"] / Decimal("100"))
+                        base_alic = (tot_alic / factor).quantize(Decimal("0.01"))
+                        iva_alic = tot_alic - base_alic
+                        alics[alic_id]["base"] = base_alic
+                        alics[alic_id]["iva"] = iva_alic
+
+                    imp_neto = sum(d["base"] for d in alics.values())
+                    imp_iva = sum(d["iva"] for d in alics.values())
+                    imp_total = sum(it.subtotal for it in req.items) + req.imp_trib + req.imp_tot_conc
+
                 if imp_op_ex_items > 0 and req.imp_op_ex == 0:
                     req.imp_op_ex = imp_op_ex_items
+
                 ivas = [
                     {
                         "Id": alic_id,
@@ -94,6 +128,7 @@ def solicitar_cae(config: Config, token: str, sign: str, req: InvoiceRequest) ->
                     if alic_id != 3 and data["iva"] > 0
                 ]
             else:
+                # Sin detalle de ítems (monto directo)
                 imp_neto = (req.monto / Decimal("1.21")).quantize(Decimal("0.01"))
                 imp_iva = (req.monto - imp_neto).quantize(Decimal("0.01"))
                 ivas = [{
@@ -101,7 +136,9 @@ def solicitar_cae(config: Config, token: str, sign: str, req: InvoiceRequest) ->
                     "BaseImp": str(imp_neto),
                     "Importe": str(imp_iva),
                 }]
-        imp_total = imp_neto + imp_iva + req.imp_trib + req.imp_op_ex + req.imp_tot_conc
+                imp_total = imp_neto + imp_iva + req.imp_trib + req.imp_op_ex + req.imp_tot_conc
+        else:
+            imp_total = imp_neto + imp_iva + req.imp_trib + req.imp_op_ex + req.imp_tot_conc
     else:
         # Factura C
         imp_total = req.monto

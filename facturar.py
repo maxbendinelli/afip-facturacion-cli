@@ -166,7 +166,11 @@ def cmd_emitir(args) -> None:
 
     # Calcular monto
     if items:
-        monto = sum(i.subtotal for i in items)
+        cbte_letra = getattr(args, "tipo", "C").upper()
+        if cbte_letra in ("A", "NDA", "NCA"):
+            monto = sum(i.total_con_iva for i in items)
+        else:
+            monto = sum(i.subtotal for i in items)
     else:
         if args.monto is None:
             _output({"error": "Debe proveer --monto o al menos un --item."}, 1)
@@ -929,14 +933,18 @@ def cmd_lote(args) -> None:
             alic_dec = Decimal(str(item["alicuota_iva"])).quantize(Decimal("0.1"))
             alic_id = 3 if alic_dec == Decimal("0.0") else 5
 
-            if item["cbte_tipo"] in (1, 6):
+            if item["cbte_tipo"] == 1:
                 if alic_dec == Decimal("0.0"):
                     neto_dec = monto_dec
                     items_obj = [InvoiceItem(descripcion=item["concepto"], cantidad=Decimal("1.00"), precio_unitario=neto_dec, alicuota_iva=Decimal("0.0"), alicuota_iva_id=3)]
                 else:
                     neto_dec = (monto_dec / (Decimal("1.00") + (alic_dec / Decimal("100")))).quantize(Decimal("0.01"))
                     items_obj = [InvoiceItem(descripcion=item["concepto"], cantidad=Decimal("1.00"), precio_unitario=neto_dec, alicuota_iva=alic_dec, alicuota_iva_id=alic_id)]
+            elif item["cbte_tipo"] == 6:
+                neto_dec = (monto_dec / (Decimal("1.00") + (alic_dec / Decimal("100")))).quantize(Decimal("0.01")) if alic_dec > Decimal("0.0") else monto_dec
+                items_obj = [InvoiceItem(descripcion=item["concepto"], cantidad=Decimal("1.00"), precio_unitario=monto_dec, alicuota_iva=alic_dec, alicuota_iva_id=alic_id)]
             else:
+                neto_dec = monto_dec
                 items_obj = [InvoiceItem(descripcion=item["concepto"], cantidad=Decimal("1.00"), precio_unitario=monto_dec, alicuota_iva=Decimal("0.0"), alicuota_iva_id=3)]
 
             if config.dry_run:

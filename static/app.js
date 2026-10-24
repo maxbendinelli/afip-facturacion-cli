@@ -160,26 +160,37 @@ function updateBannerAndUI() {
   const text = document.getElementById("cbte-info-text");
   const condIvaSelect = document.getElementById("receptor-cond-iva");
   const docTipoSelect = document.getElementById("receptor-doc-tipo");
+  const thPrice = document.getElementById("th-price-col");
+  const subtotalLabel = document.getElementById("summary-subtotal-label");
+  const ivaLabel = document.getElementById("summary-iva-label");
 
   if (activeLetra === "A") {
-    text.innerHTML = "<strong>Factura A:</strong> Para Responsables Inscriptos, Monotributistas o Monotributo Social / TIP (RG 5003 / 5616). Discrimina IVA por ítem.";
+    text.innerHTML = "<strong>Factura A:</strong> Para Responsables Inscriptos y Monotributistas (RG 5003 / 5616). Precios netos sin IVA; el IVA se discrimina y se suma al total.";
     banner.style.borderColor = "rgba(139, 92, 246, 0.4)";
     banner.style.color = "#C4B5FD";
     docTipoSelect.value = "80";
     if (!["1", "6", "13", "16"].includes(condIvaSelect.value)) {
       condIvaSelect.value = "1";
     }
+    if (thPrice) thPrice.textContent = "Precio Unit. Neto ($)";
+    if (subtotalLabel) subtotalLabel.textContent = "Subtotal Neto:";
+    if (ivaLabel) ivaLabel.textContent = "IVA Total:";
   } else if (activeLetra === "B") {
-    text.innerHTML = "<strong>Factura B:</strong> Para Consumidores Finales, Exentos, Sujetos No Categorizados o Exterior. El IVA no se discrimina.";
+    text.innerHTML = "<strong>Factura B:</strong> Para Consumidores Finales, Exentos, etc. El precio ingresado es final con IVA incluido (el IVA no se suma arriba, se desglosa internamente).";
     banner.style.borderColor = "rgba(16, 185, 129, 0.4)";
     banner.style.color = "#6EE7B7";
     if (["1", "6", "13", "16"].includes(condIvaSelect.value)) {
       condIvaSelect.value = "5";
     }
+    if (thPrice) thPrice.textContent = "Precio Final c/IVA ($)";
+    if (subtotalLabel) subtotalLabel.textContent = "Subtotal (con IVA):";
+    if (ivaLabel) ivaLabel.textContent = "IVA Contenido (desglosado):";
   } else {
-    text.innerHTML = "<strong>Factura C:</strong> Comprobante oficial de Monotributo / Exento para cualquier condición de cliente.";
+    text.innerHTML = "<strong>Factura C:</strong> Comprobante oficial de Monotributo / Exento para cualquier condición de cliente. Precios finales sin IVA.";
     banner.style.borderColor = "rgba(6, 182, 212, 0.4)";
     banner.style.color = "#67E8F9";
+    if (thPrice) thPrice.textContent = "Precio Unitario ($)";
+    if (subtotalLabel) subtotalLabel.textContent = "Subtotal:";
   }
 
   // Consultar en vivo a AFIP el próximo número
@@ -355,6 +366,7 @@ function recalcSummary() {
   const rows = document.querySelectorAll("#items-tbody tr");
   let subtotalNeto = 0;
   let totalIva = 0;
+  let totalFinal = 0;
   const ivaGroups = {};
 
   rows.forEach((tr) => {
@@ -362,41 +374,91 @@ function recalcSummary() {
     const price = parseFloat(tr.querySelector(".item-price").value) || 0;
     const ivaSelect = tr.querySelector(".item-iva");
     const ivaPorc = parseFloat(ivaSelect.value) || 0;
+    const lineVal = qty * price;
 
-    const rowNeto = qty * price;
-    let rowIva = 0;
-    if (activeLetra === "A" || activeLetra === "B") {
-      rowIva = rowNeto * (ivaPorc / 100);
-      if (!ivaGroups[ivaPorc]) ivaGroups[ivaPorc] = 0;
-      ivaGroups[ivaPorc] += rowIva;
+    if (activeLetra === "A") {
+      // Factura A: El precio unitario es NETO GRAVADO (sin IVA)
+      const rowNeto = lineVal;
+      const rowIva = rowNeto * (ivaPorc / 100);
+      if (!ivaGroups[ivaPorc]) ivaGroups[ivaPorc] = { base: 0, iva: 0 };
+      ivaGroups[ivaPorc].base += rowNeto;
+      ivaGroups[ivaPorc].iva += rowIva;
+
+      subtotalNeto += rowNeto;
+      totalIva += rowIva;
+      totalFinal += (rowNeto + rowIva);
+
+      const subtotalText = tr.querySelector(".item-subtotal-text");
+      subtotalText.textContent = `$ ${fmtNum(rowNeto)}`;
+    } else if (activeLetra === "B") {
+      // Factura B: El precio unitario es FINAL con IVA incluido
+      const rowTotal = lineVal;
+      totalFinal += rowTotal;
+
+      let rowNeto = rowTotal;
+      let rowIva = 0;
+      if (ivaPorc > 0) {
+        rowNeto = rowTotal / (1 + (ivaPorc / 100));
+        rowIva = rowTotal - rowNeto;
+      }
+
+      if (!ivaGroups[ivaPorc]) ivaGroups[ivaPorc] = { base: 0, iva: 0 };
+      ivaGroups[ivaPorc].base += rowNeto;
+      ivaGroups[ivaPorc].iva += rowIva;
+
+      subtotalNeto += rowNeto;
+      totalIva += rowIva;
+
+      const subtotalText = tr.querySelector(".item-subtotal-text");
+      subtotalText.textContent = `$ ${fmtNum(rowTotal)}`;
+    } else {
+      // Factura C: Sin IVA
+      subtotalNeto += lineVal;
+      totalFinal += lineVal;
+
+      const subtotalText = tr.querySelector(".item-subtotal-text");
+      subtotalText.textContent = `$ ${fmtNum(lineVal)}`;
     }
-
-    subtotalNeto += rowNeto;
-    totalIva += rowIva;
-
-    const subtotalText = tr.querySelector(".item-subtotal-text");
-    subtotalText.textContent = `$ ${fmtNum(rowNeto)}`;
   });
 
-  const total = subtotalNeto + totalIva;
-
-  document.getElementById("summary-subtotal").textContent = `$ ${fmtNum(subtotalNeto)}`;
-  document.getElementById("summary-total").textContent = `$ ${fmtNum(total)}`;
-
+  const subtotalElem = document.getElementById("summary-subtotal");
+  const totalElem = document.getElementById("summary-total");
   const ivaRow = document.getElementById("summary-iva-row");
+  const ivaElem = document.getElementById("summary-iva");
   const ivaBreakdown = document.getElementById("summary-iva-breakdown");
 
-  if (activeLetra === "A" || activeLetra === "B") {
+  if (activeLetra === "A") {
+    subtotalElem.textContent = `$ ${fmtNum(subtotalNeto)}`;
+    totalElem.textContent = `$ ${fmtNum(totalFinal)}`;
     ivaRow.style.display = "flex";
-    document.getElementById("summary-iva").textContent = `$ ${fmtNum(totalIva)}`;
+    ivaElem.textContent = `$ ${fmtNum(totalIva)}`;
 
     let breakdownHtml = "";
-    for (const [porc, monto] of Object.entries(ivaGroups)) {
-      if (monto > 0) {
+    for (const [porc, data] of Object.entries(ivaGroups)) {
+      if (data.iva > 0) {
         breakdownHtml += `
           <div class="breakdown-row">
-            <span>Alícuota ${porc}%:</span>
-            <span>$ ${fmtNum(monto)}</span>
+            <span>IVA ${porc}%:</span>
+            <span>$ ${fmtNum(data.iva)}</span>
+          </div>
+        `;
+      }
+    }
+    ivaBreakdown.innerHTML = breakdownHtml;
+    ivaBreakdown.style.display = breakdownHtml ? "block" : "none";
+  } else if (activeLetra === "B") {
+    subtotalElem.textContent = `$ ${fmtNum(totalFinal)}`;
+    totalElem.textContent = `$ ${fmtNum(totalFinal)}`;
+    ivaRow.style.display = "flex";
+    ivaElem.textContent = `$ ${fmtNum(totalIva)}`;
+
+    let breakdownHtml = "";
+    for (const [porc, data] of Object.entries(ivaGroups)) {
+      if (data.iva > 0) {
+        breakdownHtml += `
+          <div class="breakdown-row">
+            <span>Neto: $ ${fmtNum(data.base)} | IVA ${porc}%:</span>
+            <span>$ ${fmtNum(data.iva)}</span>
           </div>
         `;
       }
@@ -404,6 +466,8 @@ function recalcSummary() {
     ivaBreakdown.innerHTML = breakdownHtml;
     ivaBreakdown.style.display = breakdownHtml ? "block" : "none";
   } else {
+    subtotalElem.textContent = `$ ${fmtNum(totalFinal)}`;
+    totalElem.textContent = `$ ${fmtNum(totalFinal)}`;
     ivaRow.style.display = "none";
     ivaBreakdown.style.display = "none";
   }

@@ -527,9 +527,11 @@ def emitir_comprobante(payload: EmitirIn):
         )
 
     if items_list:
-        if payload.cbte_tipo in (1, 2, 3, 4, 6, 7, 8, 9):
+        if payload.cbte_tipo in (1, 2, 3, 4):
+            # Factura A: precio unitario es NETO, se suma IVA
             monto = sum(i.total_con_iva for i in items_list)
         else:
+            # Factura B y Factura C: precio unitario es FINAL con IVA incluido (o sin IVA)
             monto = sum(i.subtotal for i in items_list)
     else:
         if payload.monto is None:
@@ -616,6 +618,16 @@ def emitir_comprobante(payload: EmitirIn):
         sim_num = 9999
         pdf_name = f"comprobante_{letra}_{pv:04d}_sim_{sim_num:04d}.pdf"
         pdf_path = COMPROBANTES_DIR / pdf_name
+        if payload.cbte_tipo in (1, 2, 3, 4):
+            sim_neto = sum(i.subtotal for i in items_list) if items_list else (monto / Decimal("1.21")).quantize(Decimal("0.01"))
+            sim_iva = sum(i.iva_monto for i in items_list) if items_list else (monto - sim_neto)
+        elif payload.cbte_tipo in (6, 7, 8, 9):
+            sim_neto = sum((i.subtotal / (Decimal("1.00") + (i.alicuota_iva / Decimal("100")))).quantize(Decimal("0.01")) for i in items_list) if items_list else (monto / Decimal("1.21")).quantize(Decimal("0.01"))
+            sim_iva = monto - sim_neto
+        else:
+            sim_neto = monto
+            sim_iva = Decimal("0.00")
+
         resp_sim = InvoiceResponse(
             cae="SIMULADO_CAE_123456",
             cae_vencimiento=(hoy + timedelta(days=10)).strftime("%Y%m%d"),
@@ -635,6 +647,8 @@ def emitir_comprobante(payload: EmitirIn):
             fecha_vto_pago=fecha_vto_pago_pdf,
             hora=datetime.now().strftime("%H%M%S"),
             items=items_list,
+            imp_neto=sim_neto,
+            imp_iva=sim_iva,
         )
         generate_pdf(cfg, resp_sim, str(pdf_path), duplicado=payload.duplicado)
         return {
@@ -1070,15 +1084,22 @@ def emitir_lote(payload: LoteEmitirIn):
             alic_dec = Decimal(str(item.alicuota_iva)).quantize(Decimal("0.1"))
             alic_id = next((k for k, v in IVA_ALICUOTAS.items() if float(v["porcentaje"]) == item.alicuota_iva), 5)
             
-            # Si es Factura A o B:
-            if item.cbte_tipo in (1, 6):
+            # Items según tipo de comprobante:
+            if item.cbte_tipo == 1:
+                # Factura A: monto del CSV es total, precio unitario de item es NETO
                 if alic_dec == Decimal("0.0"):
                     neto_dec = monto_dec
                     items_obj = [InvoiceItem(descripcion=item.concepto, cantidad=Decimal("1.00"), precio_unitario=neto_dec, alicuota_iva=Decimal("0.0"), alicuota_iva_id=3)]
                 else:
                     neto_dec = (monto_dec / (Decimal("1.00") + (alic_dec / Decimal("100")))).quantize(Decimal("0.01"))
                     items_obj = [InvoiceItem(descripcion=item.concepto, cantidad=Decimal("1.00"), precio_unitario=neto_dec, alicuota_iva=alic_dec, alicuota_iva_id=alic_id)]
+            elif item.cbte_tipo == 6:
+                # Factura B: monto del CSV es FINAL con IVA, precio unitario de item es FINAL con IVA
+                neto_dec = (monto_dec / (Decimal("1.00") + (alic_dec / Decimal("100")))).quantize(Decimal("0.01")) if alic_dec > Decimal("0.0") else monto_dec
+                items_obj = [InvoiceItem(descripcion=item.concepto, cantidad=Decimal("1.00"), precio_unitario=monto_dec, alicuota_iva=alic_dec, alicuota_iva_id=alic_id)]
             else:
+                # Factura C: monto es final sin IVA
+                neto_dec = monto_dec
                 items_obj = [InvoiceItem(descripcion=item.concepto, cantidad=Decimal("1.00"), precio_unitario=monto_dec, alicuota_iva=Decimal("0.0"), alicuota_iva_id=3)]
 
             if payload.dry_run:

@@ -305,6 +305,7 @@ class InvoiceResponse:
         if self.fecha_vto_pago:
             d["fecha_vto_pago"] = self.fecha_vto_pago
         if self.items:
+            es_factura_a = self.cbte_tipo in (1, 2, 3, 4)
             d["items"] = [
                 {
                     "descripcion": i.descripcion,
@@ -313,8 +314,8 @@ class InvoiceResponse:
                     "alicuota_iva": str(getattr(i, "alicuota_iva", Decimal("21.0"))),
                     "alicuota_iva_id": getattr(i, "alicuota_iva_id", 5),
                     "subtotal": f"{i.subtotal:.2f}",
-                    "iva_monto": f"{getattr(i, 'iva_monto', Decimal('0.00')):.2f}",
-                    "total": f"{getattr(i, 'total_con_iva', i.subtotal):.2f}",
+                    "iva_monto": f"{getattr(i, 'iva_monto', Decimal('0.00')):.2f}" if es_factura_a else f"{(i.subtotal - (i.subtotal / (Decimal('1.00') + (getattr(i, 'alicuota_iva', Decimal('21.0')) / Decimal('100'))))).quantize(Decimal('0.01')):.2f}",
+                    "total": f"{getattr(i, 'total_con_iva', i.subtotal):.2f}" if es_factura_a else f"{i.subtotal:.2f}",
                 }
                 for i in self.items
             ]
