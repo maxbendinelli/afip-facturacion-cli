@@ -312,7 +312,7 @@ function setupItemsTable() {
   addItemRow("Servicio de consultoría y desarrollo", 1, 0, 21);
 }
 
-function addItemRow(desc = "", qty = 1, price = 0, alic = 21) {
+function addItemRow(desc = "", qty = 1, price = 0, alic = 21, alicId = 5, tipoIva = "iva") {
   const tbody = document.getElementById("items-tbody");
   const tr = document.createElement("tr");
 
@@ -330,12 +330,14 @@ function addItemRow(desc = "", qty = 1, price = 0, alic = 21) {
     </td>
     <td class="td-iva-col" style="${isIvaVisible ? "" : "display:none;"}">
       <select class="item-iva">
-        <option value="21" data-id="5" ${alic === 21 ? "selected" : ""}>21%</option>
-        <option value="10.5" data-id="4" ${alic === 10.5 ? "selected" : ""}>10.5%</option>
-        <option value="27" data-id="6" ${alic === 27 ? "selected" : ""}>27%</option>
-        <option value="5" data-id="8" ${alic === 5 ? "selected" : ""}>5%</option>
-        <option value="2.5" data-id="9" ${alic === 2.5 ? "selected" : ""}>2.5%</option>
-        <option value="0" data-id="3" ${alic === 0 ? "selected" : ""}>0% (Exento)</option>
+        <option value="0" data-id="1" data-tipo="no_gravado" ${alicId === 1 || tipoIva === "no_gravado" ? "selected" : ""}>No gravado</option>
+        <option value="0" data-id="2" data-tipo="exento" ${alicId === 2 || tipoIva === "exento" ? "selected" : ""}>Exento</option>
+        <option value="0" data-id="3" data-tipo="iva" ${alicId === 3 || (alic === 0 && tipoIva === "iva" && alicId !== 1 && alicId !== 2) ? "selected" : ""}>0%</option>
+        <option value="2.5" data-id="9" data-tipo="iva" ${alicId === 9 || alic === 2.5 ? "selected" : ""}>2,5%</option>
+        <option value="5" data-id="8" data-tipo="iva" ${alicId === 8 || alic === 5 ? "selected" : ""}>5%</option>
+        <option value="10.5" data-id="4" data-tipo="iva" ${alicId === 4 || alic === 10.5 ? "selected" : ""}>10,5%</option>
+        <option value="21" data-id="5" data-tipo="iva" ${(alicId === 5 || alic === 21) && tipoIva === "iva" && alicId !== 1 && alicId !== 2 ? "selected" : ""}>21%</option>
+        <option value="27" data-id="6" data-tipo="iva" ${alicId === 6 || alic === 27 ? "selected" : ""}>27%</option>
       </select>
     </td>
     <td class="subtotal-cell item-subtotal-text">$ 0,00</td>
@@ -365,6 +367,8 @@ function addItemRow(desc = "", qty = 1, price = 0, alic = 21) {
 function recalcSummary() {
   const rows = document.querySelectorAll("#items-tbody tr");
   let subtotalNeto = 0;
+  let totalNoGravado = 0;
+  let totalExento = 0;
   let totalIva = 0;
   let totalFinal = 0;
   const ivaGroups = {};
@@ -374,40 +378,65 @@ function recalcSummary() {
     const price = parseFloat(tr.querySelector(".item-price").value) || 0;
     const ivaSelect = tr.querySelector(".item-iva");
     const ivaPorc = parseFloat(ivaSelect.value) || 0;
+    const selectedOpt = ivaSelect.selectedOptions[0];
+    const alicId = selectedOpt ? parseInt(selectedOpt.getAttribute("data-id")) : 5;
+    const tipoIva = selectedOpt ? selectedOpt.getAttribute("data-tipo") : "iva";
     const lineVal = qty * price;
 
     if (activeLetra === "A") {
-      // Factura A: El precio unitario es NETO GRAVADO (sin IVA)
-      const rowNeto = lineVal;
-      const rowIva = rowNeto * (ivaPorc / 100);
-      if (!ivaGroups[ivaPorc]) ivaGroups[ivaPorc] = { base: 0, iva: 0 };
-      ivaGroups[ivaPorc].base += rowNeto;
-      ivaGroups[ivaPorc].iva += rowIva;
+      // Factura A: El precio unitario es NETO GRAVADO / NO GRAVADO / EXENTO
+      if (tipoIva === "no_gravado" || alicId === 1) {
+        totalNoGravado += lineVal;
+        totalFinal += lineVal;
+      } else if (tipoIva === "exento" || alicId === 2) {
+        totalExento += lineVal;
+        totalFinal += lineVal;
+      } else if (alicId === 3 || ivaPorc === 0) {
+        // Gravado a tasa 0%: es Neto Gravado con IVA 0
+        subtotalNeto += lineVal;
+        totalFinal += lineVal;
+        if (!ivaGroups["0%"]) ivaGroups["0%"] = { base: 0, iva: 0 };
+        ivaGroups["0%"].base += lineVal;
+      } else {
+        // Gravado positivo (2.5%, 5%, 10.5%, 21%, 27%)
+        const rowNeto = lineVal;
+        const rowIva = rowNeto * (ivaPorc / 100);
+        const groupKey = `${ivaPorc}%`;
+        if (!ivaGroups[groupKey]) ivaGroups[groupKey] = { base: 0, iva: 0 };
+        ivaGroups[groupKey].base += rowNeto;
+        ivaGroups[groupKey].iva += rowIva;
 
-      subtotalNeto += rowNeto;
-      totalIva += rowIva;
-      totalFinal += (rowNeto + rowIva);
+        subtotalNeto += rowNeto;
+        totalIva += rowIva;
+        totalFinal += (rowNeto + rowIva);
+      }
 
       const subtotalText = tr.querySelector(".item-subtotal-text");
-      subtotalText.textContent = `$ ${fmtNum(rowNeto)}`;
+      subtotalText.textContent = `$ ${fmtNum(lineVal)}`;
     } else if (activeLetra === "B") {
       // Factura B: El precio unitario es FINAL con IVA incluido
       const rowTotal = lineVal;
       totalFinal += rowTotal;
 
-      let rowNeto = rowTotal;
-      let rowIva = 0;
-      if (ivaPorc > 0) {
-        rowNeto = rowTotal / (1 + (ivaPorc / 100));
-        rowIva = rowTotal - rowNeto;
+      if (tipoIva === "no_gravado" || alicId === 1) {
+        totalNoGravado += rowTotal;
+      } else if (tipoIva === "exento" || alicId === 2) {
+        totalExento += rowTotal;
+      } else if (alicId === 3 || ivaPorc === 0) {
+        subtotalNeto += rowTotal;
+        if (!ivaGroups["0%"]) ivaGroups["0%"] = { base: 0, iva: 0 };
+        ivaGroups["0%"].base += rowTotal;
+      } else {
+        const rowNeto = rowTotal / (1 + (ivaPorc / 100));
+        const rowIva = rowTotal - rowNeto;
+        const groupKey = `${ivaPorc}%`;
+        if (!ivaGroups[groupKey]) ivaGroups[groupKey] = { base: 0, iva: 0 };
+        ivaGroups[groupKey].base += rowNeto;
+        ivaGroups[groupKey].iva += rowIva;
+
+        subtotalNeto += rowNeto;
+        totalIva += rowIva;
       }
-
-      if (!ivaGroups[ivaPorc]) ivaGroups[ivaPorc] = { base: 0, iva: 0 };
-      ivaGroups[ivaPorc].base += rowNeto;
-      ivaGroups[ivaPorc].iva += rowIva;
-
-      subtotalNeto += rowNeto;
-      totalIva += rowIva;
 
       const subtotalText = tr.querySelector(".item-subtotal-text");
       subtotalText.textContent = `$ ${fmtNum(rowTotal)}`;
@@ -434,11 +463,27 @@ function recalcSummary() {
     ivaElem.textContent = `$ ${fmtNum(totalIva)}`;
 
     let breakdownHtml = "";
-    for (const [porc, data] of Object.entries(ivaGroups)) {
-      if (data.iva > 0) {
+    if (totalNoGravado > 0) {
+      breakdownHtml += `
+        <div class="breakdown-row" style="color:var(--text-muted);">
+          <span>No gravado:</span>
+          <span>$ ${fmtNum(totalNoGravado)}</span>
+        </div>
+      `;
+    }
+    if (totalExento > 0) {
+      breakdownHtml += `
+        <div class="breakdown-row" style="color:var(--text-muted);">
+          <span>Exento:</span>
+          <span>$ ${fmtNum(totalExento)}</span>
+        </div>
+      `;
+    }
+    for (const [key, data] of Object.entries(ivaGroups)) {
+      if (data.iva > 0 || key === "0%") {
         breakdownHtml += `
           <div class="breakdown-row">
-            <span>IVA ${porc}%:</span>
+            <span>IVA ${key}:</span>
             <span>$ ${fmtNum(data.iva)}</span>
           </div>
         `;
@@ -453,11 +498,27 @@ function recalcSummary() {
     ivaElem.textContent = `$ ${fmtNum(totalIva)}`;
 
     let breakdownHtml = "";
-    for (const [porc, data] of Object.entries(ivaGroups)) {
+    if (totalNoGravado > 0) {
+      breakdownHtml += `
+        <div class="breakdown-row" style="color:var(--text-muted);">
+          <span>No gravado:</span>
+          <span>$ ${fmtNum(totalNoGravado)}</span>
+        </div>
+      `;
+    }
+    if (totalExento > 0) {
+      breakdownHtml += `
+        <div class="breakdown-row" style="color:var(--text-muted);">
+          <span>Exento:</span>
+          <span>$ ${fmtNum(totalExento)}</span>
+        </div>
+      `;
+    }
+    for (const [key, data] of Object.entries(ivaGroups)) {
       if (data.iva > 0) {
         breakdownHtml += `
           <div class="breakdown-row">
-            <span>Neto: $ ${fmtNum(data.base)} | IVA ${porc}%:</span>
+            <span>Neto: $ ${fmtNum(data.base)} | IVA ${key}:</span>
             <span>$ ${fmtNum(data.iva)}</span>
           </div>
         `;
@@ -507,7 +568,9 @@ async function emitirFactura() {
     const price = parseFloat(tr.querySelector(".item-price").value) || 0;
     const ivaSelect = tr.querySelector(".item-iva");
     const ivaPorc = parseFloat(ivaSelect.value) || 0;
-    const ivaId = parseInt(ivaSelect.selectedOptions[0].getAttribute("data-id")) || 5;
+    const selectedOpt = ivaSelect.selectedOptions[0];
+    const ivaId = selectedOpt ? parseInt(selectedOpt.getAttribute("data-id")) : 5;
+    const tipoIva = selectedOpt ? selectedOpt.getAttribute("data-tipo") : "iva";
 
     if (desc && qty > 0) {
       items.push({
@@ -516,6 +579,7 @@ async function emitirFactura() {
         precio_unitario: price,
         alicuota_iva: ivaPorc,
         alicuota_iva_id: ivaId,
+        tipo_iva: tipoIva,
       });
     }
   });

@@ -379,7 +379,18 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
                 hdr[0], Paragraph(hdr[1], _desc_hdr_style), hdr[2], hdr[3], hdr[4], hdr[5], hdr[6]
             ]]
             for item in resp.items:
-                alic_text = f"{getattr(item, 'alicuota_iva', Decimal('21.0'))}%"
+                alic_id = getattr(item, "alicuota_iva_id", 5)
+                tipo_it = getattr(item, "tipo_iva", "iva")
+                if tipo_it == "no_gravado" or alic_id == 1:
+                    alic_text = "No gravado"
+                elif tipo_it == "exento" or alic_id == 2:
+                    alic_text = "Exento"
+                elif alic_id == 3 or getattr(item, "alicuota_iva", Decimal("21.0")) == Decimal("0.0"):
+                    alic_text = "0%"
+                else:
+                    alic_val = getattr(item, "alicuota_iva", Decimal("21.0"))
+                    val_str = f"{alic_val}".replace(".0", "") if f"{alic_val}".endswith(".0") else f"{alic_val}"
+                    alic_text = f"{val_str}%"
                 rows.append([
                     "",
                     Paragraph(item.descripcion, _desc_style),
@@ -491,6 +502,11 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
         totals_data = [
             ["Importe Neto Gravado: $", _fmt_num(resp.imp_neto if resp.imp_neto is not None else subtotal_neto)],
         ]
+        if getattr(resp, "imp_tot_conc", None) and resp.imp_tot_conc > Decimal("0.00"):
+            totals_data.append(["Importe No Gravado: $", _fmt_num(resp.imp_tot_conc)])
+        if getattr(resp, "imp_op_ex", None) and resp.imp_op_ex > Decimal("0.00"):
+            totals_data.append(["Importe Exento: $", _fmt_num(resp.imp_op_ex)])
+
         if resp.ivas:
             for iv in resp.ivas:
                 alic_id = int(iv["Id"])

@@ -55,13 +55,17 @@ def _parse_doc(raw: str, default_tipo: int | None = None) -> tuple[int, str]:
 
 
 def _parse_item(raw: str) -> InvoiceItem:
-    """Parsea 'descripcion|cantidad|precio_unitario'."""
+    """Parsea 'descripcion|cantidad|precio_unitario' o 'descripcion|cantidad|precio_unitario|alicuota'."""
     parts = raw.split("|")
-    if len(parts) != 3:
+    if len(parts) == 3:
+        desc, qty_s, price_s = parts
+        alic_s = "21"
+    elif len(parts) == 4:
+        desc, qty_s, price_s, alic_s = parts
+    else:
         raise ValueError(
-            f"Formato de ítem inválido: '{raw}'. Use: 'Descripción|Cantidad|PrecioUnitario'"
+            f"Formato de ítem inválido: '{raw}'. Use: 'Descripción|Cantidad|PrecioUnitario' o 'Descripción|Cantidad|PrecioUnitario|Alicuota'"
         )
-    desc, qty_s, price_s = parts
     try:
         qty = Decimal(qty_s.strip()).quantize(Decimal("0.01"))
         price = Decimal(price_s.strip()).quantize(Decimal("0.01"))
@@ -69,7 +73,24 @@ def _parse_item(raw: str) -> InvoiceItem:
         raise ValueError(f"Cantidad o precio inválido en ítem: '{raw}'")
     if qty <= 0 or price == 0:
         raise ValueError(f"Cantidad debe ser mayor a cero y precio distinto de cero en ítem: '{raw}'")
-    return InvoiceItem(descripcion=desc.strip(), cantidad=qty, precio_unitario=price)
+
+    alic_raw = alic_s.strip().upper().replace("%", "")
+    if "NO GRAV" in alic_raw or "NG" == alic_raw:
+        return InvoiceItem(descripcion=desc.strip(), cantidad=qty, precio_unitario=price, alicuota_iva=Decimal("0.0"), alicuota_iva_id=1, tipo_iva="no_gravado")
+    elif "EXENT" in alic_raw or "EX" == alic_raw:
+        return InvoiceItem(descripcion=desc.strip(), cantidad=qty, precio_unitario=price, alicuota_iva=Decimal("0.0"), alicuota_iva_id=2, tipo_iva="exento")
+    elif alic_raw in ("0", "0.0"):
+        return InvoiceItem(descripcion=desc.strip(), cantidad=qty, precio_unitario=price, alicuota_iva=Decimal("0.0"), alicuota_iva_id=3, tipo_iva="iva")
+    elif "10.5" in alic_raw or "10,5" in alic_raw:
+        return InvoiceItem(descripcion=desc.strip(), cantidad=qty, precio_unitario=price, alicuota_iva=Decimal("10.5"), alicuota_iva_id=4, tipo_iva="iva")
+    elif "27" in alic_raw:
+        return InvoiceItem(descripcion=desc.strip(), cantidad=qty, precio_unitario=price, alicuota_iva=Decimal("27.0"), alicuota_iva_id=6, tipo_iva="iva")
+    elif "5" in alic_raw and "2.5" not in alic_raw and "10.5" not in alic_raw:
+        return InvoiceItem(descripcion=desc.strip(), cantidad=qty, precio_unitario=price, alicuota_iva=Decimal("5.0"), alicuota_iva_id=8, tipo_iva="iva")
+    elif "2.5" in alic_raw or "2,5" in alic_raw:
+        return InvoiceItem(descripcion=desc.strip(), cantidad=qty, precio_unitario=price, alicuota_iva=Decimal("2.5"), alicuota_iva_id=9, tipo_iva="iva")
+    else:
+        return InvoiceItem(descripcion=desc.strip(), cantidad=qty, precio_unitario=price, alicuota_iva=Decimal("21.0"), alicuota_iva_id=5, tipo_iva="iva")
 
 
 def _parse_condicion_iva(raw: str) -> int:
@@ -839,12 +860,49 @@ def cmd_lote(args) -> None:
         except Exception: monto = 0.0
 
         alic_raw = (row.get("alicuota_iva") or ("21" if tipo_str in ("A", "B") else "0")).replace("%", "").strip().upper()
-        if "EXENTO" in alic_raw or alic_raw == "0": alic_iva = 0.0
-        elif "10.5" in alic_raw: alic_iva = 10.5
-        elif "27" in alic_raw: alic_iva = 27.0
+        if "NO GRAV" in alic_raw or "NO_GRAV" in alic_raw or alic_raw == "NG":
+            tipo_iva = "no_gravado"
+            alic_id = 1
+            alic_iva = 0.0
+        elif "EXENT" in alic_raw or alic_raw == "EX":
+            tipo_iva = "exento"
+            alic_id = 2
+            alic_iva = 0.0
+        elif alic_raw in ("0", "0.0", "0,0"):
+            tipo_iva = "iva"
+            alic_id = 3
+            alic_iva = 0.0
+        elif "10.5" in alic_raw or "10,5" in alic_raw:
+            tipo_iva = "iva"
+            alic_id = 4
+            alic_iva = 10.5
+        elif "27" in alic_raw:
+            tipo_iva = "iva"
+            alic_id = 6
+            alic_iva = 27.0
+        elif "5" in alic_raw and "2.5" not in alic_raw and "10.5" not in alic_raw:
+            tipo_iva = "iva"
+            alic_id = 8
+            alic_iva = 5.0
+        elif "2.5" in alic_raw or "2,5" in alic_raw:
+            tipo_iva = "iva"
+            alic_id = 9
+            alic_iva = 2.5
         else:
-            try: alic_iva = float(alic_raw)
-            except Exception: alic_iva = 21.0 if tipo_str in ("A", "B") else 0.0
+            try:
+                val = float(alic_raw.replace(",", "."))
+                if val == 0.0:
+                    tipo_iva = "iva"
+                    alic_id = 3
+                    alic_iva = 0.0
+                else:
+                    tipo_iva = "iva"
+                    alic_id = 5
+                    alic_iva = val
+            except Exception:
+                tipo_iva = "iva"
+                alic_id = 5 if tipo_str in ("A", "B") else 3
+                alic_iva = 21.0 if tipo_str in ("A", "B") else 0.0
 
         cond_id = 1 if tipo_str == "A" else 5
         try: doc_tipo, doc_nro = _parse_doc(dni_field)
@@ -871,6 +929,8 @@ def cmd_lote(args) -> None:
             "concepto": concepto,
             "monto": monto,
             "alicuota_iva": alic_iva,
+            "alicuota_iva_id": alic_id,
+            "tipo_iva": tipo_iva,
             "condicion_iva_receptor": cond_id,
             "condicion_venta": (row.get("condicion_venta") or "Contado").strip(),
             "concepto_afip": 2,
@@ -939,21 +999,20 @@ def cmd_lote(args) -> None:
         try:
             monto_dec = Decimal(str(item["monto"])).quantize(Decimal("0.01"))
             alic_dec = Decimal(str(item["alicuota_iva"])).quantize(Decimal("0.1"))
-            alic_id = 3 if alic_dec == Decimal("0.0") else 5
+            tipo_it = item.get("tipo_iva") or ("no_gravado" if item.get("alicuota_iva_id") == 1 else "exento" if item.get("alicuota_iva_id") == 2 else "iva")
+            alic_id = item.get("alicuota_iva_id") or (1 if tipo_it == "no_gravado" else 2 if tipo_it == "exento" else 3 if alic_dec == Decimal("0.0") else 5)
 
             if item["cbte_tipo"] == 1:
-                if alic_dec == Decimal("0.0"):
+                if tipo_it in ("no_gravado", "exento") or alic_id in (1, 2, 3) or alic_dec == Decimal("0.0"):
                     neto_dec = monto_dec
-                    items_obj = [InvoiceItem(descripcion=item["concepto"], cantidad=Decimal("1.00"), precio_unitario=neto_dec, alicuota_iva=Decimal("0.0"), alicuota_iva_id=3)]
+                    items_obj = [InvoiceItem(descripcion=item["concepto"], cantidad=Decimal("1.00"), precio_unitario=neto_dec, alicuota_iva=Decimal("0.0"), alicuota_iva_id=alic_id, tipo_iva=tipo_it)]
                 else:
                     neto_dec = (monto_dec / (Decimal("1.00") + (alic_dec / Decimal("100")))).quantize(Decimal("0.01"))
-                    items_obj = [InvoiceItem(descripcion=item["concepto"], cantidad=Decimal("1.00"), precio_unitario=neto_dec, alicuota_iva=alic_dec, alicuota_iva_id=alic_id)]
+                    items_obj = [InvoiceItem(descripcion=item["concepto"], cantidad=Decimal("1.00"), precio_unitario=neto_dec, alicuota_iva=alic_dec, alicuota_iva_id=alic_id, tipo_iva=tipo_it)]
             elif item["cbte_tipo"] == 6:
-                neto_dec = (monto_dec / (Decimal("1.00") + (alic_dec / Decimal("100")))).quantize(Decimal("0.01")) if alic_dec > Decimal("0.0") else monto_dec
-                items_obj = [InvoiceItem(descripcion=item["concepto"], cantidad=Decimal("1.00"), precio_unitario=monto_dec, alicuota_iva=alic_dec, alicuota_iva_id=alic_id)]
+                items_obj = [InvoiceItem(descripcion=item["concepto"], cantidad=Decimal("1.00"), precio_unitario=monto_dec, alicuota_iva=alic_dec, alicuota_iva_id=alic_id, tipo_iva=tipo_it)]
             else:
-                neto_dec = monto_dec
-                items_obj = [InvoiceItem(descripcion=item["concepto"], cantidad=Decimal("1.00"), precio_unitario=monto_dec, alicuota_iva=Decimal("0.0"), alicuota_iva_id=3)]
+                items_obj = [InvoiceItem(descripcion=item["concepto"], cantidad=Decimal("1.00"), precio_unitario=monto_dec, alicuota_iva=Decimal("0.0"), alicuota_iva_id=3, tipo_iva="iva")]
 
             if config.dry_run:
                 pv = config.punto_venta or 4

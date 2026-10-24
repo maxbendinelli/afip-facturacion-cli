@@ -45,14 +45,16 @@ CBTE_LETRA = {
     11: "C", 12: "C", 13: "C", 15: "C",
 }
 
-# Tabla de alícuotas AFIP (WSFEv1)
+# Tabla de alícuotas y conceptos de IVA AFIP (WSFEv1 / Comprobantes en Línea)
 IVA_ALICUOTAS = {
-    3: {"id": 3, "porcentaje": Decimal("0.0"), "desc": "0%"},
-    4: {"id": 4, "porcentaje": Decimal("10.5"), "desc": "10.5%"},
-    5: {"id": 5, "porcentaje": Decimal("21.0"), "desc": "21%"},
-    6: {"id": 6, "porcentaje": Decimal("27.0"), "desc": "27%"},
-    8: {"id": 8, "porcentaje": Decimal("5.0"), "desc": "5%"},
-    9: {"id": 9, "porcentaje": Decimal("2.5"), "desc": "2.5%"},
+    1: {"id": 1, "tipo": "no_gravado", "porcentaje": Decimal("0.0"), "desc": "No gravado"},
+    2: {"id": 2, "tipo": "exento", "porcentaje": Decimal("0.0"), "desc": "Exento"},
+    3: {"id": 3, "tipo": "iva", "porcentaje": Decimal("0.0"), "desc": "0%"},
+    4: {"id": 4, "tipo": "iva", "porcentaje": Decimal("10.5"), "desc": "10.5%"},
+    5: {"id": 5, "tipo": "iva", "porcentaje": Decimal("21.0"), "desc": "21%"},
+    6: {"id": 6, "tipo": "iva", "porcentaje": Decimal("27.0"), "desc": "27%"},
+    8: {"id": 8, "tipo": "iva", "porcentaje": Decimal("5.0"), "desc": "5%"},
+    9: {"id": 9, "tipo": "iva", "porcentaje": Decimal("2.5"), "desc": "2.5%"},
 }
 
 DOC_TIPO_NOMBRE = {
@@ -187,6 +189,14 @@ class InvoiceItem:
     precio_unitario: Decimal
     alicuota_iva: Decimal = Decimal("21.0")
     alicuota_iva_id: int = 5
+    tipo_iva: str = "iva"  # "iva", "exento", "no_gravado"
+
+    def __post_init__(self):
+        if self.tipo_iva == "iva":
+            if self.alicuota_iva_id == 1:
+                self.tipo_iva = "no_gravado"
+            elif self.alicuota_iva_id == 2:
+                self.tipo_iva = "exento"
 
     @property
     def subtotal(self) -> Decimal:
@@ -196,6 +206,8 @@ class InvoiceItem:
     @property
     def iva_monto(self) -> Decimal:
         """Monto de IVA correspondiente a este ítem."""
+        if self.tipo_iva in ("no_gravado", "exento") or self.alicuota_iva_id in (1, 2, 3) or self.alicuota_iva == Decimal("0.0"):
+            return Decimal("0.00")
         return (self.subtotal * (self.alicuota_iva / Decimal("100"))).quantize(Decimal("0.01"))
 
     @property
@@ -262,6 +274,7 @@ class InvoiceResponse:
     imp_iva: Optional[Decimal] = None
     imp_trib: Optional[Decimal] = None
     imp_op_ex: Optional[Decimal] = None
+    imp_tot_conc: Optional[Decimal] = None
     ivas: list = field(default_factory=list)
 
     def to_json(self) -> dict:
@@ -305,21 +318,39 @@ class InvoiceResponse:
             d["periodo_hasta"] = self.periodo_hasta
         if self.fecha_vto_pago:
             d["fecha_vto_pago"] = self.fecha_vto_pago
+        if self.imp_tot_conc is not None:
+            d["imp_tot_conc"] = f"{self.imp_tot_conc:.2f}"
         if self.items:
             es_factura_a = self.cbte_tipo in (1, 2, 3, 4)
-            d["items"] = [
-                {
+            items_list_json = []
+            for i in self.items:
+                tipo_it = getattr(i, "tipo_iva", "iva")
+                alic_id = getattr(i, "alicuota_iva_id", 5)
+                alic_val = getattr(i, "alicuota_iva", Decimal("21.0"))
+                if tipo_it in ("no_gravado", "exento") or alic_id in (1, 2, 3) or alic_val == Decimal("0.0"):
+                    iva_monto = Decimal("0.00")
+                    total_it = i.subtotal
+                elif es_factura_a:
+                    iva_monto = i.iva_monto
+                    total_it = i.total_con_iva
+                else:
+                    factor = Decimal("1.00") + (alic_val / Decimal("100"))
+                    base_it = (i.subtotal / factor).quantize(Decimal("0.01"))
+                    iva_monto = i.subtotal - base_it
+                    total_it = i.subtotal
+
+                items_list_json.append({
                     "descripcion": i.descripcion,
                     "cantidad": str(i.cantidad),
                     "precio_unitario": f"{i.precio_unitario:.2f}",
-                    "alicuota_iva": str(getattr(i, "alicuota_iva", Decimal("21.0"))),
-                    "alicuota_iva_id": getattr(i, "alicuota_iva_id", 5),
+                    "alicuota_iva": str(alic_val),
+                    "alicuota_iva_id": alic_id,
+                    "tipo_iva": tipo_it,
                     "subtotal": f"{i.subtotal:.2f}",
-                    "iva_monto": f"{getattr(i, 'iva_monto', Decimal('0.00')):.2f}" if es_factura_a else f"{(i.subtotal - (i.subtotal / (Decimal('1.00') + (getattr(i, 'alicuota_iva', Decimal('21.0')) / Decimal('100'))))).quantize(Decimal('0.01')):.2f}",
-                    "total": f"{getattr(i, 'total_con_iva', i.subtotal):.2f}" if es_factura_a else f"{i.subtotal:.2f}",
-                }
-                for i in self.items
-            ]
+                    "iva_monto": f"{iva_monto:.2f}",
+                    "total": f"{total_it:.2f}",
+                })
+            d["items"] = items_list_json
         if self.observaciones:
             d["observaciones"] = self.observaciones
         return d
