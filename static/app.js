@@ -531,11 +531,15 @@ async function emitirFactura() {
     return;
   }
 
+  const domElem = document.getElementById("receptor-domicilio");
+  const domicilio = domElem ? domElem.value.trim() : "";
+
   const payload = {
     cbte_tipo: activeCbteTipo,
     doc_tipo: docTipo,
     cuit_cliente: docTipo === 99 ? "0" : docNro,
     nombre_cliente: nombre,
+    domicilio_cliente: domicilio || null,
     concepto_afip: parseInt(document.getElementById("op-concepto").value),
     condicion_iva_receptor: parseInt(condIvaVal),
     condicion_venta: document.getElementById("op-cond-venta").value,

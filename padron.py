@@ -82,15 +82,35 @@ def buscar_persona(config: Config, cuit: str) -> dict | None:
 
     domicilio_fiscal = next(
         (d for d in (getattr(p, "domicilio", None) or [])
-         if getattr(d, "tipoDomicilio", "") == "FISCAL"),
+         if getattr(d, "tipoDomicilio", "").upper() == "FISCAL"),
         None,
     )
+    if not domicilio_fiscal and getattr(p, "domicilio", None):
+        domicilio_fiscal = p.domicilio[0]
+
+    dom_str = None
+    if domicilio_fiscal:
+        parts = []
+        d_dir = _clean(getattr(domicilio_fiscal, "direccion", None))
+        d_loc = _clean(getattr(domicilio_fiscal, "localidad", None))
+        d_prov = _clean(getattr(domicilio_fiscal, "descripcionProvincia", None))
+        d_cp = _clean(getattr(domicilio_fiscal, "codigoPostal", None))
+
+        if d_dir:
+            parts.append(d_dir)
+        if d_loc:
+            parts.append(d_loc)
+        if d_prov and d_prov != d_loc:
+            parts.append(d_prov)
+        if d_cp:
+            parts.append(f"CP {d_cp}")
+        dom_str = " - ".join(parts) if parts else (d_dir or None)
 
     return {
         "nombre": nombre,
         "cuit": cuit,
         "tipo_persona": getattr(p, "tipoPersona", None),
         "actividad": getattr(p, "descripcionActividadPrincipal", None),
-        "domicilio": getattr(domicilio_fiscal, "direccion", None) if domicilio_fiscal else None,
+        "domicilio": dom_str,
         "localidad": getattr(domicilio_fiscal, "descripcionProvincia", None) if domicilio_fiscal else None,
     }

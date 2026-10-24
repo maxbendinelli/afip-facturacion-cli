@@ -335,6 +335,10 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
     max_dom_w = right_col_w - lbl_dom_w
     while dom_fs > 6 and c.stringWidth(domicilio_txt, "Helvetica", dom_fs) > max_dom_w:
         dom_fs -= 0.5
+    if domicilio_txt and c.stringWidth(domicilio_txt, "Helvetica", dom_fs) > max_dom_w:
+        while len(domicilio_txt) > 5 and c.stringWidth(domicilio_txt + "...", "Helvetica", dom_fs) > max_dom_w:
+            domicilio_txt = domicilio_txt[:-1]
+        domicilio_txt += "..."
     _lv(c, br, by2, lbl_dom, domicilio_txt, dom_fs)
 
     y -= BUYER_H

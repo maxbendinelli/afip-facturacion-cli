@@ -134,6 +134,7 @@ class EmitirIn(BaseModel):
     doc_tipo: Optional[int] = None  # 1: Factura A, 6: Factura B, 11: Factura C
     cuit_cliente: str = "SIN_CUIT"
     nombre_cliente: Optional[str] = None
+    domicilio_cliente: Optional[str] = None
     concepto: Optional[str] = None
     concepto_afip: int = 2  # 1=productos, 2=servicios, 3=ambos
     condicion_iva_receptor: Optional[int] = None
@@ -205,6 +206,7 @@ class LoteRowIn(BaseModel):
     cbte_tipo: int = 11
     cuit_cliente: str = "SIN_CUIT"
     nombre_cliente: str = "Consumidor Final"
+    domicilio_cliente: Optional[str] = None
     concepto: str = "Servicio"
     monto: float = 0.0
     alicuota_iva: float = 21.0
@@ -582,12 +584,17 @@ def emitir_comprobante(payload: EmitirIn):
 
     datos_padron = None
     nombre_cliente = payload.nombre_cliente or ""
+    domicilio_cliente = (payload.domicilio_cliente or "").strip()
+
     if doc_tipo == 80:
-        if not nombre_cliente:
+        if not nombre_cliente or not domicilio_cliente:
             try:
                 datos_padron = buscar_persona(cfg, doc_nro)
-                if datos_padron and datos_padron.get("nombre"):
-                    nombre_cliente = datos_padron["nombre"]
+                if datos_padron:
+                    if not nombre_cliente and datos_padron.get("nombre"):
+                        nombre_cliente = datos_padron["nombre"]
+                    if not domicilio_cliente and datos_padron.get("domicilio"):
+                        domicilio_cliente = datos_padron["domicilio"]
             except Exception:
                 pass
         if not nombre_cliente:
@@ -667,6 +674,7 @@ def emitir_comprobante(payload: EmitirIn):
             periodo_desde=periodo_desde if payload.concepto_afip in (2, 3) else None,
             periodo_hasta=periodo_hasta if payload.concepto_afip in (2, 3) else None,
             fecha_vto_pago=fecha_vto_pago_pdf,
+            domicilio_cliente=domicilio_cliente or None,
             hora=datetime.now().strftime("%H%M%S"),
             items=items_list,
             imp_neto=sim_neto,
@@ -716,6 +724,7 @@ def emitir_comprobante(payload: EmitirIn):
         condicion_venta=payload.condicion_venta,
         periodo_desde=periodo_desde if payload.concepto_afip in (2, 3) else None,
         periodo_hasta=periodo_hasta if payload.concepto_afip in (2, 3) else None,
+        domicilio_cliente=domicilio_cliente or None,
         items=items_list,
         numero_original=payload.numero_original,
         cbte_tipo_original=payload.cbte_tipo_original,
@@ -728,8 +737,10 @@ def emitir_comprobante(payload: EmitirIn):
 
     resp.hora = datetime.now().strftime("%H%M%S")
     resp.fecha_vto_pago = fecha_vto_pago_pdf
-    if datos_padron:
-        resp.domicilio_cliente = datos_padron.get("domicilio")
+    if domicilio_cliente:
+        resp.domicilio_cliente = domicilio_cliente
+    elif datos_padron and datos_padron.get("domicilio"):
+        resp.domicilio_cliente = datos_padron["domicilio"]
 
     letra = CBTE_LETRA.get(resp.cbte_tipo, "C").lower()
     pdf_filename = f"comprobante_{letra}_{resp.punto_venta:04d}_{resp.numero:08d}.pdf"
@@ -761,11 +772,11 @@ def emitir_comprobante(payload: EmitirIn):
 def get_csv_template():
     """Retorna un archivo CSV modelo con ejemplos para descargar."""
     content = (
-        "tipo,cuit_cliente,nombre_cliente,concepto,monto,alicuota_iva,condicion_iva\n"
-        "C,20123456789,Juan Perez,Servicio de consultoria,15000,0,CF\n"
-        "B,SIN_CUIT,Consumidor Final,Articulos de libreria,24200,21,CF\n"
-        "A,30712345671,Empresa SA,Desarrollo de software,50000,21,RI\n"
-        "C,27234567894,Maria Gomez,Diseno web,35000,0,MONO\n"
+        "tipo,cuit_cliente,nombre_cliente,domicilio,concepto,monto,alicuota_iva,condicion_iva\n"
+        "C,20123456789,Juan Perez,Av. Rivadavia 1234 - CABA,Servicio de consultoria,15000,0,CF\n"
+        "B,SIN_CUIT,Consumidor Final,,Articulos de libreria,24200,21,CF\n"
+        "A,30712345671,Empresa SA,San Martin 456 - Rosario,Desarrollo de software,50000,21,RI\n"
+        "C,27234567894,Maria Gomez,Belgrano 789 - Cordoba,Diseno web,35000,0,MONO\n"
     )
     return Response(
         content=content,
@@ -837,6 +848,8 @@ async def parse_lote_csv(file: UploadFile = File(...)):
         c = c.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
         if "destinatario" in c or "apellido_y_nombre" in c:
             return "nombre_cliente"
+        if "domicilio" in c or "direccion" in c:
+            return "domicilio_cliente"
         if "dni" in c or "cuit" in c:
             return "cuit_cliente"
         if "producto" in c or "servicio" in c or "concepto" in c or "descripcion" in c:
@@ -880,6 +893,7 @@ async def parse_lote_csv(file: UploadFile = File(...)):
 
         dni_field = (row.get("cuit_cliente") or row.get("cuit") or row.get("dni") or "").strip()
         nombre = (row.get("nombre_cliente") or row.get("cliente") or row.get("razon_social") or "").strip()
+        domicilio = (row.get("domicilio_cliente") or row.get("domicilio") or row.get("direccion") or "").strip()
         monto_raw = (row.get("monto") or row.get("importe") or row.get("precio_unitario") or "0").replace("$", "").replace(" ", "")
 
         if not nombre and not dni_field and monto_raw in ("", "0"):
@@ -1023,6 +1037,7 @@ async def parse_lote_csv(file: UploadFile = File(...)):
             "doc_tipo": doc_tipo,
             "doc_nro": doc_nro,
             "nombre_cliente": nombre or "Consumidor Final",
+            "domicilio_cliente": domicilio or None,
             "concepto": concepto,
             "monto": monto,
             "neto": neto,
@@ -1141,6 +1156,15 @@ def emitir_lote(payload: LoteEmitirIn):
                 serv_hasta = item.periodo_hasta or hoy
                 vto_pago = item.fecha_vto_pago or (item.fecha or hoy)
 
+                domicilio_item = getattr(item, "domicilio_cliente", None)
+                if not domicilio_item and doc_tipo == 80 and not payload.dry_run:
+                    try:
+                        p_info = buscar_persona(cfg, doc_nro)
+                        if p_info and p_info.get("domicilio"):
+                            domicilio_item = p_info["domicilio"]
+                    except Exception:
+                        pass
+
                 resp_sim = InvoiceResponse(
                     cae="SIMULADO_CAE_123456",
                     cae_vencimiento=(hoy_dt + timedelta(days=10)).strftime("%Y%m%d"),
@@ -1151,6 +1175,7 @@ def emitir_lote(payload: LoteEmitirIn):
                     monto=monto_dec,
                     nombre_cliente=item.nombre_cliente,
                     cuit_cliente=doc_nro,
+                    domicilio_cliente=domicilio_item,
                     resultado="A",
                     doc_tipo=doc_tipo,
                     condicion_iva_receptor=item.condicion_iva_receptor,

@@ -227,6 +227,7 @@ def solicitar_cae(config: Config, token: str, sign: str, req: InvoiceRequest) ->
         concepto=req.concepto,
         periodo_desde=req.periodo_desde,
         periodo_hasta=req.periodo_hasta,
+        domicilio_cliente=req.domicilio_cliente,
         items=req.items,
         observaciones=observaciones,
         imp_neto=imp_neto,

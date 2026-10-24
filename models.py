@@ -223,6 +223,7 @@ class InvoiceRequest:
     condicion_venta: str = "Contado"
     periodo_desde: Optional[str] = None
     periodo_hasta: Optional[str] = None
+    domicilio_cliente: Optional[str] = None
     items: list = field(default_factory=list)  # list[InvoiceItem]
     numero_original: Optional[int] = None
     cbte_tipo_original: Optional[int] = None

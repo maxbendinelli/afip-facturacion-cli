@@ -247,6 +247,10 @@ def cmd_emitir(args) -> None:
     if not nombre_cliente:
         _output({"error": "No se pudo determinar el nombre del receptor. Use --nombre-cliente."}, 1)
 
+    domicilio_cliente = getattr(args, "domicilio_cliente", None)
+    if not domicilio_cliente and datos_padron and datos_padron.get("domicilio"):
+        domicilio_cliente = datos_padron["domicilio"]
+
     # Concepto: si hay ítems, usar sus descripciones; si no, usar --concepto
     if items and not args.concepto:
         concepto = "; ".join(i.descripcion for i in items)
@@ -280,6 +284,7 @@ def cmd_emitir(args) -> None:
                 periodo_desde=periodo_desde,
                 periodo_hasta=periodo_hasta,
                 fecha_vto_pago=fecha_vto_pago_pdf,
+                domicilio_cliente=domicilio_cliente,
                 hora=datetime.now().strftime("%H%M%S"),
                 items=items,
             )
@@ -356,8 +361,10 @@ def cmd_emitir(args) -> None:
 
     resp.hora = datetime.now().strftime("%H%M%S")
     resp.fecha_vto_pago = fecha_vto_pago_pdf
-    if datos_padron:
-        resp.domicilio_cliente = datos_padron.get("domicilio")
+    if domicilio_cliente:
+        resp.domicilio_cliente = domicilio_cliente
+    elif datos_padron and datos_padron.get("domicilio"):
+        resp.domicilio_cliente = datos_padron["domicilio"]
 
     result = resp.to_json()
     result["condicion_iva_nombre"] = condicion_iva_nombre
@@ -860,6 +867,7 @@ def cmd_lote(args) -> None:
             "doc_tipo": doc_tipo,
             "doc_nro": doc_nro,
             "nombre_cliente": nombre or "Consumidor Final",
+            "domicilio_cliente": (row.get("domicilio_cliente") or "").strip() or None,
             "concepto": concepto,
             "monto": monto,
             "alicuota_iva": alic_iva,
@@ -1120,6 +1128,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_emit.add_argument("--cuit-cliente", default="SIN_CUIT", metavar="CUIT|SIN_CUIT")
     p_emit.add_argument("--nombre-cliente", default=None, metavar="NOMBRE",
                         help="Opcional: se resuelve automáticamente por padrón A13 si se pasa CUIT")
+    p_emit.add_argument("--domicilio-cliente", default=None, metavar="DOMICILIO",
+                        help="Domicilio del cliente / receptor")
     p_emit.add_argument("--monto", type=float, default=None, metavar="IMPORTE",
                         help="Total. Si se usan --item se calcula automáticamente")
     p_emit.add_argument("--item", action="append", metavar="DESC|CANT|PRECIO",
