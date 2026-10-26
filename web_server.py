@@ -526,12 +526,20 @@ def get_ultimo_cbte(cbte_tipo: int, env: Optional[str] = Query(None)):
         cfg = load_config(env=target_env, dry_run=False)
         token, sign = get_token_sign(cfg)
         ultimo = get_ultimo_numero(cfg, token, sign, cbte_tipo)
+        fecha_ultimo = None
+        if ultimo > 0:
+            try:
+                det = consultar_comprobante(cfg, token, sign, cbte_tipo, ultimo)
+                fecha_ultimo = det.get("fecha")
+            except Exception:
+                pass
         return {
             "status": "ok",
             "cbte_tipo": cbte_tipo,
             "tipo_nombre": CBTE_NOMBRE.get(cbte_tipo, str(cbte_tipo)),
             "ultimo_numero": ultimo,
             "proximo_numero": ultimo + 1,
+            "fecha_ultimo": fecha_ultimo,
             "punto_venta": cfg.punto_venta,
             "env": target_env,
         }
@@ -771,6 +779,27 @@ def emitir_comprobante(payload: EmitirIn):
     except Exception as e:
         raise HTTPException(status_code=400, detail=_format_afip_error(e))
     proximo_nro = ultimo + 1
+
+    # Validación de fecha AFIP: CbteFch no puede ser anterior a la fecha del último comprobante
+    if ultimo > 0:
+        try:
+            det_ult = consultar_comprobante(cfg, token, sign, payload.cbte_tipo, ultimo)
+            fch_ult = str(det_ult.get("fecha") or "")
+            if fch_ult and len(fch_ult) == 8 and fecha < fch_ult:
+                if target_env == "homo":
+                    # En homologación se ajusta automáticamente para evitar el error 10016 por pruebas previas
+                    fecha = fch_ult
+                else:
+                    fch_fmt = f"{fch_ult[6:]}/{fch_ult[4:6]}/{fch_ult[:4]}"
+                    fch_req_fmt = f"{fecha[6:]}/{fecha[4:6]}/{fecha[:4]}"
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Error AFIP: La fecha ingresada ({fch_req_fmt}) no puede ser anterior a la del último comprobante emitido (#{ultimo} del {fch_fmt}). Selecciona fecha {fch_fmt} o posterior."
+                    )
+        except HTTPException:
+            raise
+        except Exception:
+            pass
 
     req = InvoiceRequest(
         cbte_tipo=payload.cbte_tipo,

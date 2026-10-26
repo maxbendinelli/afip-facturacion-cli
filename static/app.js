@@ -208,6 +208,19 @@ function updateBannerAndUI() {
         extraSpan.style.color = "var(--text-main)";
         extraSpan.innerHTML = `📡 <strong>AFIP Online:</strong> Próximo a emitir: <strong>${ptoVta}-${prox}</strong> (Último registrado en AFIP: #${data.ultimo_numero})`;
         text.appendChild(extraSpan);
+
+        if (data.fecha_ultimo && data.fecha_ultimo.length === 8) {
+          const y = data.fecha_ultimo.substring(0, 4);
+          const m = data.fecha_ultimo.substring(4, 6);
+          const d = data.fecha_ultimo.substring(6, 8);
+          const fchUltIso = `${y}-${m}-${d}`;
+          const fechaInput = document.getElementById("op-fecha");
+          if (fechaInput && fechaInput.value < fchUltIso) {
+            fechaInput.value = fchUltIso;
+            fechaInput.min = fchUltIso;
+            showToast(`Fecha de emisión ajustada a ${d}/${m}/${y} (última fecha autorizada en AFIP para este comprobante)`, "info");
+          }
+        }
       }
     })
     .catch(() => {});
