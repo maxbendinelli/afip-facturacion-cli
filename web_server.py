@@ -670,6 +670,10 @@ def emitir_comprobante(payload: EmitirIn):
 
     fecha_vto_pago_afip = payload.fecha_vto_pago or periodo_hasta
     fecha_vto_pago_pdf = payload.fecha_vto_pago or fecha
+    if fecha_vto_pago_afip < fecha:
+        fecha_vto_pago_afip = fecha
+    if fecha_vto_pago_pdf < fecha:
+        fecha_vto_pago_pdf = fecha
 
     concepto_desc = payload.concepto or ""
     if not concepto_desc and items_list:
@@ -789,6 +793,10 @@ def emitir_comprobante(payload: EmitirIn):
                 if target_env == "homo":
                     # En homologación se ajusta automáticamente para evitar el error 10016 por pruebas previas
                     fecha = fch_ult
+                    if fecha_vto_pago_afip < fecha:
+                        fecha_vto_pago_afip = fecha
+                    if fecha_vto_pago_pdf < fecha:
+                        fecha_vto_pago_pdf = fecha
                 else:
                     fch_fmt = f"{fch_ult[6:]}/{fch_ult[4:6]}/{fch_ult[:4]}"
                     fch_req_fmt = f"{fecha[6:]}/{fecha[4:6]}/{fecha[:4]}"

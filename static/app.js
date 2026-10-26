@@ -72,6 +72,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("op-vto-pago").value = getTodayStr();
 
   // Concepto listener
+    document.getElementById("op-fecha").addEventListener("change", (e) => {
+    const vtoInput = document.getElementById("op-vto-pago");
+    if (vtoInput && vtoInput.value < e.target.value) {
+      vtoInput.value = e.target.value;
+    }
+  });
+
   document.getElementById("op-concepto").addEventListener("change", (e) => {
     const isService = e.target.value === "2" || e.target.value === "3";
     document.getElementById("fechas-servicio-box").classList.toggle("hidden", !isService);
@@ -218,7 +225,12 @@ function updateBannerAndUI() {
           if (fechaInput && fechaInput.value < fchUltIso) {
             fechaInput.value = fchUltIso;
             fechaInput.min = fchUltIso;
-            showToast(`Fecha de emisión ajustada a ${d}/${m}/${y} (última fecha autorizada en AFIP para este comprobante)`, "info");
+            const vtoInput = document.getElementById("op-vto-pago");
+            if (vtoInput && vtoInput.value < fchUltIso) {
+              vtoInput.value = fchUltIso;
+              vtoInput.min = fchUltIso;
+            }
+            showToast(`Fecha ajustada a ${d}/${m}/${y} (última fecha autorizada en AFIP para este comprobante)`, "info");
           }
         }
       }

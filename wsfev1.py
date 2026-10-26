@@ -198,7 +198,11 @@ def solicitar_cae(config: Config, token: str, sign: str, req: InvoiceRequest) ->
     if req.concepto_afip in (2, 3):
         det["FchServDesde"] = req.fecha_serv_desde
         det["FchServHasta"] = req.fecha_serv_hasta
-        det["FchVtoPago"] = req.fecha_vto_pago
+        # Regla fiscal AFIP 10036: FchVtoPago no puede ser anterior a CbteFch
+        fch_vto = req.fecha_vto_pago or req.fecha
+        if fch_vto < req.fecha:
+            fch_vto = req.fecha
+        det["FchVtoPago"] = fch_vto
 
     # Nota de crédito/débito requiere comprobante asociado
     if req.numero_original is not None:
