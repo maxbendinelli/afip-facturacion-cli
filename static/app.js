@@ -51,6 +51,7 @@ function getLastDayOfMonthStr() {
 // ── INICIALIZACIÓN ────────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", async () => {
+  setupTheme();
   setupTabs();
   setupComprobantePills();
   setupItemsTable();
@@ -1544,4 +1545,45 @@ function setupCsrForm() {
       showToast("Contenido del CSR copiado al portapapeles.", "success");
     });
   });
+}
+
+
+// ── THEME CONTROLLER ──────────────────────────────────────────────────────────
+
+function setupTheme() {
+  const btnToggle = document.getElementById("btn-theme-toggle");
+  let currentTheme = "light";
+  try {
+    const saved = localStorage.getItem("arca_afip_theme");
+    if (saved === "dark" || saved === "light") {
+      currentTheme = saved;
+    }
+  } catch (e) {}
+
+  applyTheme(currentTheme);
+
+  if (btnToggle) {
+    btnToggle.addEventListener("click", () => {
+      currentTheme = (currentTheme === "light") ? "dark" : "light";
+      try {
+        localStorage.setItem("arca_afip_theme", currentTheme);
+      } catch (e) {}
+      applyTheme(currentTheme);
+      showToast(
+        currentTheme === "light" ? "Modo Claro activado" : "Modo Oscuro activado",
+        "info"
+      );
+    });
+  }
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  document.body.classList.remove("dark-theme", "light-theme");
+  document.body.classList.add(theme + "-theme");
+
+  const btnToggle = document.getElementById("btn-theme-toggle");
+  if (btnToggle) {
+    btnToggle.title = theme === "light" ? "Cambiar a Modo Oscuro" : "Cambiar a Modo Claro";
+  }
 }
