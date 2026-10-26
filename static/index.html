@@ -350,10 +350,16 @@
               </div>
 
               <div class="summary-options">
-                <label class="checkbox-label">
-                  <input type="checkbox" id="chk-duplicado">
-                  <span>Generar Duplicado en el PDF</span>
-                </label>
+                <div class="form-group" style="margin-bottom: 0.5rem;">
+                  <label for="sel-ejemplares" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;">Ejemplares en PDF:</label>
+                  <select id="sel-ejemplares" style="padding: 0.5rem 0.75rem; font-size: 0.8125rem; border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text-main); border: 1px solid var(--border-color);">
+                    <option value="1" selected>Original (1 ejemplar)</option>
+                    <option value="2">Original y Duplicado (2 ejemplares)</option>
+                    <option value="3">Original, Duplicado y Triplicado (3 ejemplares)</option>
+                  </select>
+                </div>
+                <input type="checkbox" id="chk-duplicado" style="display:none;">
+                <input type="checkbox" id="chk-triplicado" style="display:none;">
                 <label class="checkbox-label">
                   <input type="checkbox" id="chk-dry-run">
                   <span>Modo Simulación (Dry-Run sin AFIP)</span>
@@ -444,10 +450,15 @@
                   <option value="prod">🔴 AFIP Producción (OFICIAL LEGAL - CAE Real)</option>
                 </select>
               </div>
-              <label class="checkbox-label" style="margin: 0;">
-                <input type="checkbox" id="chk-lote-duplicado">
-                <span>Generar Duplicados</span>
-              </label>
+              <div class="form-group" style="margin: 0; min-width: 170px;">
+                <select id="sel-lote-ejemplares" style="padding: 6px 10px; font-weight: 500; font-size: 0.8125rem; border-radius: var(--radius-sm); background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);">
+                  <option value="1" selected>PDF: Solo Original</option>
+                  <option value="2">PDF: Con Duplicado</option>
+                  <option value="3">PDF: Con Triplicado</option>
+                </select>
+              </div>
+              <input type="checkbox" id="chk-lote-duplicado" style="display:none;">
+              <input type="checkbox" id="chk-lote-triplicado" style="display:none;">
               <button type="button" class="btn btn-primary" id="btn-emitir-lote">
                 <span class="spinner hidden" id="lote-spinner"></span>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>

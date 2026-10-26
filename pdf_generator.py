@@ -497,7 +497,9 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
         leyenda_p.drawOn(c, MARGIN + 3 * mm, y - box_h + 1.5 * mm)
         y -= box_h + 3 * mm
 
-    # ── TOTALES ──────────────────────────────────────────────────────────────
+    # ── TOTALES Y RÉGIMEN TRANSPARENCIA FISCAL (LEY 27.743 - RG 5614/2024) ──
+    es_factura_b = resp.cbte_tipo in (6, 7, 8)
+
     if es_factura_a:
         totals_data = [
             ["Importe Neto Gravado: $", _fmt_num(resp.imp_neto if resp.imp_neto is not None else subtotal_neto)],
@@ -517,29 +519,127 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
 
         totals_data.append(["Importe Otros Tributos: $", _fmt_num(resp.imp_trib or Decimal("0.00"))])
         totals_data.append(["Importe Total: $", _fmt_num(resp.monto)])
+
+        t_tot = Table(totals_data, colWidths=[CONTENT_W * 0.82, CONTENT_W * 0.18])
+        t_tot.setStyle(TableStyle([
+            ("FONTNAME",      (0, 0), (-1, -2), "Helvetica"),
+            ("FONTNAME",      (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("FONTSIZE",      (0, 0), (-1, -1), 8),
+            ("BOX",           (0, 0), (-1, -1), 0.4, colors.black),
+            ("LINEAFTER",     (0, 0), (0, -1), 0.4, colors.black),
+            ("LINEBELOW",     (1, 0), (1, -2), 0.4, colors.black),
+            ("ALIGN",         (0, 0), (0, -1), "RIGHT"),
+            ("ALIGN",         (1, 0), (1, -1), "RIGHT"),
+            ("TOPPADDING",    (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
+        ]))
+    elif es_factura_b:
+        # Régimen de Transparencia Fiscal al Consumidor (Ley 27.743 - RG 5614/2024)
+        # Aplica a Responsables Inscriptos cuando emiten Factura B a Consumidor Final
+        iva_contenido = Decimal("0.00")
+        if getattr(resp, "imp_iva", None) and resp.imp_iva > Decimal("0.00"):
+            iva_contenido = resp.imp_iva
+        elif getattr(resp, "ivas", None):
+            try:
+                iva_contenido = sum(Decimal(str(iv.get("Importe", 0))) for iv in resp.ivas)
+            except Exception:
+                pass
+        elif getattr(resp, "imp_neto", None):
+            iva_calc = resp.monto - resp.imp_neto - (resp.imp_trib or Decimal("0.00"))
+            if iva_calc > Decimal("0.00"):
+                iva_contenido = iva_calc
+
+        otros_trib = resp.imp_trib or Decimal("0.00")
+
+        w_left_label = CONTENT_W * 0.38
+        w_left_val = CONTENT_W * 0.18
+        w_right_label = CONTENT_W * 0.26
+        w_right_val = CONTENT_W * 0.18
+
+        combined_rows = [
+            [
+                "Régimen de Transparencia Fiscal al Consumidor (Ley 27.743)",
+                "",
+                "Subtotal: $",
+                _fmt_num(subtotal_neto),
+            ],
+            [
+                "IVA Contenido: $",
+                _fmt_num(iva_contenido),
+                "Importe Otros Tributos: $",
+                _fmt_num(otros_trib),
+            ],
+            [
+                "Otros Impuestos Nacionales Indirectos: $",
+                _fmt_num(otros_trib),
+                "Importe Total: $",
+                _fmt_num(resp.monto),
+            ],
+        ]
+
+        t_tot = Table(combined_rows, colWidths=[w_left_label, w_left_val, w_right_label, w_right_val])
+        t_tot.setStyle(TableStyle([
+            # Encabezado Transparencia Fiscal
+            ("SPAN",          (0, 0), (1, 0)),
+            ("BACKGROUND",    (0, 0), (1, 0), _GREY),
+            ("FONTNAME",      (0, 0), (1, 0), "Helvetica-Bold"),
+            ("FONTSIZE",      (0, 0), (1, 0), 7.5),
+            ("ALIGN",         (0, 0), (1, 0), "CENTER"),
+
+            # Bloque izquierdo (Ley 27.743)
+            ("BOX",           (0, 0), (1, -1), 0.4, colors.black),
+            ("FONTNAME",      (0, 1), (0, -1), "Helvetica"),
+            ("FONTNAME",      (1, 1), (1, -1), "Helvetica"),
+            ("FONTSIZE",      (0, 1), (1, -1), 7.5),
+            ("ALIGN",         (0, 1), (0, -1), "LEFT"),
+            ("ALIGN",         (1, 1), (1, -1), "RIGHT"),
+            ("LINEBELOW",     (0, 0), (1, 0), 0.4, colors.black),
+            ("LINEBELOW",     (0, 1), (1, 1), 0.4, colors.black),
+            ("LINEAFTER",     (0, 1), (0, -1), 0.4, colors.black),
+
+            # Bloque derecho (Totales)
+            ("BOX",           (2, 0), (3, -1), 0.4, colors.black),
+            ("FONTNAME",      (2, 0), (3, -2), "Helvetica"),
+            ("FONTNAME",      (2, -1), (3, -1), "Helvetica-Bold"),
+            ("FONTSIZE",      (2, 0), (3, -1), 8),
+            ("ALIGN",         (2, 0), (2, -1), "RIGHT"),
+            ("ALIGN",         (3, 0), (3, -1), "RIGHT"),
+            ("LINEAFTER",     (2, 0), (2, -1), 0.4, colors.black),
+            ("LINEBELOW",     (2, 0), (3, -2), 0.4, colors.black),
+
+            # Padding
+            ("TOPPADDING",    (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
+        ]))
     else:
+        # Facturas C y demás comprobantes sin IVA discriminado (Monotributo / Exento)
         totals_data = [
             ["Subtotal: $", _fmt_num(subtotal_neto)],
             ["Importe Otros Tributos: $", _fmt_num(resp.imp_trib or Decimal("0.00"))],
             ["Importe Total: $", _fmt_num(resp.monto)],
         ]
 
-    t_tot = Table(totals_data, colWidths=[CONTENT_W * 0.82, CONTENT_W * 0.18])
-    t_tot.setStyle(TableStyle([
-        ("FONTNAME",      (0, 0), (-1, -2), "Helvetica"),
-        ("FONTNAME",      (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("FONTSIZE",      (0, 0), (-1, -1), 8),
-        ("BOX",           (0, 0), (-1, -1), 0.4, colors.black),
-        ("LINEAFTER",     (0, 0), (0, -1), 0.4, colors.black),
-        ("LINEBELOW",     (1, 0), (1, -2), 0.4, colors.black),
-        ("ALIGN",         (0, 0), (0, -1), "RIGHT"),
-        ("ALIGN",         (1, 0), (1, -1), "RIGHT"),
-        ("TOPPADDING",    (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ("LEFTPADDING",   (0, 0), (-1, -1), 4),
-        ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
-    ]))
-    t_tot.wrapOn(c, CONTENT_W, 50 * mm)
+        t_tot = Table(totals_data, colWidths=[CONTENT_W * 0.82, CONTENT_W * 0.18])
+        t_tot.setStyle(TableStyle([
+            ("FONTNAME",      (0, 0), (-1, -2), "Helvetica"),
+            ("FONTNAME",      (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("FONTSIZE",      (0, 0), (-1, -1), 8),
+            ("BOX",           (0, 0), (-1, -1), 0.4, colors.black),
+            ("LINEAFTER",     (0, 0), (0, -1), 0.4, colors.black),
+            ("LINEBELOW",     (1, 0), (1, -2), 0.4, colors.black),
+            ("ALIGN",         (0, 0), (0, -1), "RIGHT"),
+            ("ALIGN",         (1, 0), (1, -1), "RIGHT"),
+            ("TOPPADDING",    (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
+        ]))
+
+    t_tot.wrapOn(c, CONTENT_W, 60 * mm)
     t_tot_h = t_tot._height
     t_tot.drawOn(c, MARGIN, y - t_tot_h)
     y -= t_tot_h + 5 * mm
@@ -602,10 +702,17 @@ def _resolve_image_path(p: str | None) -> str | None:
     return None
 
 def generate_pdf(config: Config, resp: InvoiceResponse, output_path: str,
-                 duplicado: bool = False) -> str:
+                 duplicado: bool = False,
+                 triplicado: bool = False,
+                 copias: int = 1) -> str:
     c = canvas.Canvas(output_path, pagesize=A4)
     _draw_comprobante(c, config, resp, y_start=PAGE_H - MARGIN, label="ORIGINAL")
-    if duplicado:
+    if triplicado or copias >= 3:
+        c.showPage()
+        _draw_comprobante(c, config, resp, y_start=PAGE_H - MARGIN, label="DUPLICADO")
+        c.showPage()
+        _draw_comprobante(c, config, resp, y_start=PAGE_H - MARGIN, label="TRIPLICADO")
+    elif duplicado or copias == 2:
         c.showPage()
         _draw_comprobante(c, config, resp, y_start=PAGE_H - MARGIN, label="DUPLICADO")
     c.save()

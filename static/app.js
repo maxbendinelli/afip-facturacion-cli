@@ -613,7 +613,9 @@ async function emitirFactura() {
     periodo_hasta: document.getElementById("op-serv-hasta").value.replace(/-/g, ""),
     fecha_vto_pago: document.getElementById("op-vto-pago").value.replace(/-/g, ""),
     items: items,
-    duplicado: document.getElementById("chk-duplicado").checked,
+    duplicado: (parseInt(document.getElementById("sel-ejemplares")?.value || (document.getElementById("chk-duplicado")?.checked ? "2" : "1")) >= 2),
+    triplicado: (parseInt(document.getElementById("sel-ejemplares")?.value || "1") >= 3),
+    copias: parseInt(document.getElementById("sel-ejemplares")?.value || (document.getElementById("chk-duplicado")?.checked ? "2" : "1")),
     dry_run: document.getElementById("chk-dry-run").checked,
   };
 
@@ -883,7 +885,9 @@ async function emitirLoteActual() {
 
   const dryRun = (modo === "dryrun");
   const env = (modo === "prod") ? "prod" : "homo";
-  const duplicado = document.getElementById("chk-lote-duplicado")?.checked ?? false;
+  const copiasLote = parseInt(document.getElementById("sel-lote-ejemplares")?.value || (document.getElementById("chk-lote-duplicado")?.checked ? "2" : "1"));
+  const duplicado = copiasLote >= 2;
+  const triplicado = copiasLote >= 3;
 
   const yaEmitidos = currentLoteParsed.rows.filter(r => r.cae && r.cae.trim()).length;
   const pendientesCount = currentLoteParsed.rows.length - yaEmitidos;
@@ -921,6 +925,8 @@ async function emitirLoteActual() {
       env: env,
       dry_run: dryRun,
       duplicado: duplicado,
+      triplicado: triplicado,
+      copias: copiasLote,
     };
 
     const res = await fetch("/api/lotes/emitir", {

@@ -311,7 +311,7 @@ def cmd_emitir(args) -> None:
                 hora=datetime.now().strftime("%H%M%S"),
                 items=items,
             )
-            generate_pdf(config, resp_sim, pdf_path, duplicado=args.duplicado)
+            generate_pdf(config, resp_sim, pdf_path, duplicado=args.duplicado, triplicado=getattr(args, "triplicado", False))
 
         _output({
             "status": "dry-run-ok",
@@ -395,7 +395,7 @@ def cmd_emitir(args) -> None:
     if getattr(args, "pdf", False):
         from pdf_generator import generate_pdf
         pdf_path = f"factura_{resp.punto_venta:04d}_{resp.numero:08d}.pdf"
-        generate_pdf(config, resp, pdf_path, duplicado=args.duplicado)
+        generate_pdf(config, resp, pdf_path, duplicado=args.duplicado, triplicado=getattr(args, "triplicado", False))
         result["pdf"] = pdf_path
 
     _output(result)
@@ -627,7 +627,7 @@ def cmd_consultar(args) -> None:
     )
 
     pdf_path = args.output or f"factura_{resp.punto_venta:04d}_{resp.numero:08d}.pdf"
-    generate_pdf(config, resp, pdf_path, duplicado=args.duplicado)
+    generate_pdf(config, resp, pdf_path, duplicado=args.duplicado, triplicado=getattr(args, "triplicado", False))
     data["pdf"] = pdf_path
     _output({"status": "ok", **data})
 
@@ -693,7 +693,7 @@ def cmd_reimprimir(args) -> None:
     )
 
     pdf_path = args.output or f"factura_{resp.punto_venta:04d}_{resp.numero:08d}.pdf"
-    generate_pdf(config, resp, pdf_path, duplicado=args.duplicado)
+    generate_pdf(config, resp, pdf_path, duplicado=args.duplicado, triplicado=getattr(args, "triplicado", False))
     _output({"status": "ok", "pdf": pdf_path})
 
 
@@ -750,7 +750,7 @@ def cmd_generar_pdf(args) -> None:
     )
 
     pdf_path = args.output or f"factura_{resp.punto_venta:04d}_{resp.numero:08d}.pdf"
-    generate_pdf(config, resp, pdf_path, duplicado=args.duplicado)
+    generate_pdf(config, resp, pdf_path, duplicado=args.duplicado, triplicado=getattr(args, "triplicado", False))
     _output({"status": "ok", "pdf": pdf_path})
 
 
@@ -1052,7 +1052,7 @@ def cmd_lote(args) -> None:
                 )
 
                 if args.pdf:
-                    generate_pdf(config, resp_sim, str(pdf_path), duplicado=args.duplicado)
+                    generate_pdf(config, resp_sim, str(pdf_path), duplicado=args.duplicado, triplicado=getattr(args, "triplicado", False))
                     generated_pdfs.append(pdf_path)
 
                 resultados.append({
@@ -1125,7 +1125,7 @@ def cmd_lote(args) -> None:
             pdf_name = f"comprobante_{letra.lower()}_{resp.punto_venta:04d}_{resp.numero:08d}.pdf"
             pdf_path = comprobantes_dir / pdf_name
             if args.pdf:
-                generate_pdf(config, resp, str(pdf_path), duplicado=args.duplicado)
+                generate_pdf(config, resp, str(pdf_path), duplicado=args.duplicado, triplicado=getattr(args, "triplicado", False))
                 generated_pdfs.append(pdf_path)
 
             resp_dict = resp.to_json()
@@ -1222,6 +1222,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_emit.add_argument("--dry-run", action="store_true")
     p_emit.add_argument("--pdf", action="store_true", help="Generar PDF")
     p_emit.add_argument("--duplicado", action="store_true", help="PDF con duplicado")
+    p_emit.add_argument("--triplicado", action="store_true", help="PDF con original, duplicado y triplicado")
     p_emit.add_argument("--cuit-emisor", default=None, metavar="CUIT", help="Opcional: sobreescribir el CUIT del emisor para realizar pruebas")
 
     # --- validar-cuit ---
@@ -1270,6 +1271,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_con.add_argument("--tipo", choices=["A", "B", "C", "NCA", "NCB", "NCC", "NDA", "NDB", "NDC", "NC", "ND"], default="C")
     p_con.add_argument("--pdf", action="store_true", help="Generar PDF con los datos obtenidos de AFIP")
     p_con.add_argument("--duplicado", action="store_true")
+    p_con.add_argument("--triplicado", action="store_true", help="PDF con triplicado")
     p_con.add_argument("--output", metavar="ARCHIVO.pdf")
     p_con.add_argument("--env", choices=["homo", "prod"], default="prod")
 
@@ -1278,6 +1280,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_reim.add_argument("json_file", metavar="ARCHIVO.json|-",
                         help="JSON devuelto por 'emitir', o '-' para leer de stdin")
     p_reim.add_argument("--duplicado", action="store_true", help="PDF con duplicado")
+    p_reim.add_argument("--triplicado", action="store_true", help="PDF con triplicado")
     p_reim.add_argument("--output", metavar="ARCHIVO.pdf")
     p_reim.add_argument("--env", choices=["homo", "prod"], default="prod")
 
@@ -1288,6 +1291,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_lote.add_argument("--dry-run", action="store_true", help="Simulación local sin contactar a AFIP")
     p_lote.add_argument("--pdf", action="store_true", default=True, help="Generar comprobantes en PDF (default: True)")
     p_lote.add_argument("--duplicado", action="store_true", help="Generar ejemplares duplicados")
+    p_lote.add_argument("--triplicado", action="store_true", help="Generar ejemplares hasta triplicado")
     p_lote.add_argument("--zip", metavar="SALIDA.zip", default=None, help="Empaquetar todos los PDFs en un archivo ZIP")
     p_lote.add_argument("--cuit-emisor", default=None, metavar="CUIT", help="Opcional: sobreescribir el CUIT del emisor para realizar pruebas")
 
@@ -1308,6 +1312,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_pdf.add_argument("--periodo-hasta", metavar="YYYYMMDD")
     p_pdf.add_argument("--fecha-vto-pago", default=None, metavar="YYYYMMDD")
     p_pdf.add_argument("--duplicado", action="store_true")
+    p_pdf.add_argument("--triplicado", action="store_true", help="PDF con triplicado")
     p_pdf.add_argument("--env", choices=["homo", "prod"], default="prod")
     p_pdf.add_argument("--output", metavar="ARCHIVO.pdf")
 

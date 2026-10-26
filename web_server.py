@@ -153,11 +153,14 @@ class EmitirIn(BaseModel):
     numero_original: Optional[int] = None
     cbte_tipo_original: Optional[int] = None
     duplicado: bool = False
+    triplicado: bool = False
+    copias: int = 1
     env: Optional[str] = None
     dry_run: bool = False
 
 
 class PreviewSampleIn(BaseModel):
+    cbte_tipo: Optional[int] = None
     razon_social: Optional[str] = None
     domicilio: Optional[str] = None
     condicion_iva_emisor: Optional[str] = None
@@ -201,6 +204,8 @@ class ReimprimirIn(BaseModel):
     cbte_tipo: int
     numero: int
     duplicado: bool = False
+    triplicado: bool = False
+    copias: int = 1
 
 
 class LoteRowIn(BaseModel):
@@ -233,6 +238,8 @@ class LoteEmitirIn(BaseModel):
     environment: Optional[str] = None
     dry_run: bool = True
     duplicado: bool = False
+    triplicado: bool = False
+    copias: int = 1
 
 
 
@@ -739,7 +746,7 @@ def emitir_comprobante(payload: EmitirIn):
             imp_tot_conc=sim_tot_conc,
             ivas=sim_ivas,
         )
-        generate_pdf(cfg, resp_sim, str(pdf_path), duplicado=payload.duplicado)
+        generate_pdf(cfg, resp_sim, str(pdf_path), duplicado=payload.duplicado, triplicado=getattr(payload, 'triplicado', False), copias=getattr(payload, 'copias', 1))
         return {
             "status": "ok",
             "modo": "simulacion",
@@ -806,9 +813,9 @@ def emitir_comprobante(payload: EmitirIn):
     pdf_path = COMPROBANTES_DIR / pdf_filename
     root_pdf_path = BASE_DIR / pdf_filename
 
-    generate_pdf(cfg, resp, str(pdf_path), duplicado=payload.duplicado)
+    generate_pdf(cfg, resp, str(pdf_path), duplicado=payload.duplicado, triplicado=getattr(payload, 'triplicado', False), copias=getattr(payload, 'copias', 1))
     try:
-        generate_pdf(cfg, resp, str(root_pdf_path), duplicado=payload.duplicado)
+        generate_pdf(cfg, resp, str(root_pdf_path), duplicado=payload.duplicado, triplicado=getattr(payload, 'triplicado', False), copias=getattr(payload, 'copias', 1))
     except Exception:
         pass
 
@@ -1278,7 +1285,7 @@ def emitir_lote(payload: LoteEmitirIn):
                     imp_neto=monto_dec if item.cbte_tipo not in (1, 6) or alic_dec == Decimal("0.0") else neto_dec,
                     imp_iva=Decimal("0.00") if item.cbte_tipo not in (1, 6) or alic_dec == Decimal("0.0") else (monto_dec - neto_dec),
                 )
-                generate_pdf(cfg, resp_sim, str(pdf_path), duplicado=payload.duplicado)
+                generate_pdf(cfg, resp_sim, str(pdf_path), duplicado=payload.duplicado, triplicado=getattr(payload, 'triplicado', False), copias=getattr(payload, 'copias', 1))
 
                 resp_dict = resp_sim.to_json()
                 resp_dict["pdf_filename"] = pdf_name
@@ -1367,7 +1374,7 @@ def emitir_lote(payload: LoteEmitirIn):
             # Generar PDF
             letra = CBTE_LETRA.get(resp.cbte_tipo, "C").lower()
             pdf_name = f"comprobante_{letra}_{resp.punto_venta:04d}_{resp.numero:08d}.pdf"
-            generate_pdf(cfg, resp, str(COMPROBANTES_DIR / pdf_name), duplicado=payload.duplicado)
+            generate_pdf(cfg, resp, str(COMPROBANTES_DIR / pdf_name), duplicado=payload.duplicado, triplicado=getattr(payload, 'triplicado', False), copias=getattr(payload, 'copias', 1))
 
             resp_dict = resp.to_json()
             resp_dict["pdf_filename"] = pdf_name
@@ -1481,23 +1488,33 @@ def preview_sample_pdf(payload: Optional[PreviewSampleIn] = None):
     iva_total = sum(i.iva_monto for i in items)
     monto_total = subtotal_neto + iva_total
 
+    is_monotributo = "monotributo" in (cfg.condicion_iva_emisor or "").lower()
+    if payload and payload.cbte_tipo:
+        preview_tipo = payload.cbte_tipo
+    else:
+        preview_tipo = 11 if is_monotributo else 6 # Factura C o Factura B a Consumidor Final
+    preview_cliente = "CONSUMIDOR FINAL EJEMPLO"
+    preview_cuit = "0"
+    preview_doc_tipo = 99
+    preview_cond_rec = 5
+
     sample_resp = InvoiceResponse(
         cae="74251829304918",
         cae_vencimiento=date.today().strftime("%Y%m%d"),
         numero=9999,
-        cbte_tipo=1,  # Factura A para mostrar todas las columnas y opciones
+        cbte_tipo=preview_tipo,
         punto_venta=cfg.punto_venta or 4,
         fecha=date.today().strftime("%Y%m%d"),
         monto=monto_total,
-        nombre_cliente="EMPRESA CLIENTE S.A.",
-        cuit_cliente="30712345671",
+        nombre_cliente=preview_cliente,
+        cuit_cliente=preview_cuit,
         resultado="A",
-        doc_tipo=80,
-        condicion_iva_receptor=1,
+        doc_tipo=preview_doc_tipo,
+        condicion_iva_receptor=preview_cond_rec,
         items=items,
         imp_neto=subtotal_neto,
-        imp_iva=iva_total,
-        ivas=[{"Id": 5, "BaseImp": str(subtotal_neto), "Importe": str(iva_total)}],
+        imp_iva=iva_total if not is_monotributo else Decimal("0.00"),
+        ivas=[{"Id": 5, "BaseImp": str(subtotal_neto), "Importe": str(iva_total)}] if not is_monotributo else [],
         hora="123045",
         periodo_desde=date.today().replace(day=1).strftime("%Y%m%d"),
         periodo_hasta=date.today().strftime("%Y%m%d"),
@@ -1599,7 +1616,7 @@ def reimprimir_comprobante(payload: ReimprimirIn, env: Optional[str] = Query(Non
         pdf_filename = f"comprobante_{letra}_{resp.punto_venta:04d}_{resp.numero:08d}.pdf"
         pdf_path = COMPROBANTES_DIR / pdf_filename
 
-        generate_pdf(cfg, resp, str(pdf_path), duplicado=payload.duplicado)
+        generate_pdf(cfg, resp, str(pdf_path), duplicado=payload.duplicado, triplicado=getattr(payload, 'triplicado', False), copias=getattr(payload, 'copias', 1))
 
         return {
             "status": "ok",
