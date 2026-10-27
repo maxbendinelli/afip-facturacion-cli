@@ -264,21 +264,29 @@ function setupReceptorListeners() {
 
   docInput.addEventListener("blur", () => {
     const val = docInput.value.replace(/\D/g, "");
-    if (val.length === 11 && docTipoSelect.value === "80") {
+    if ((val.length === 11 && ["80", "86", "87"].includes(docTipoSelect.value)) ||
+        (val.length >= 7 && val.length <= 8 && docTipoSelect.value === "96")) {
       consultarPadron();
     }
   });
 
   docTipoSelect.addEventListener("change", (e) => {
-    if (e.target.value === "99") {
+    const val = e.target.value;
+    if (val === "99") {
       docInput.value = "";
       if (document.getElementById("receptor-nombre").value === "Consumidor Final") {
         document.getElementById("receptor-nombre").value = "";
       }
       document.getElementById("receptor-nombre").placeholder = "Sin identificar (o ingrese Nombre)";
       condIvaSelect.value = "5";
+      docInput.placeholder = "Sin documento (Consumidor Final)";
+    } else if (val === "96") {
+      document.getElementById("receptor-nombre").placeholder = "Nombre completo o Razón Social";
+      docInput.placeholder = "Ej: 25568477 (DNI de 7 u 8 dígitos)";
+      if (!condIvaSelect.value) condIvaSelect.value = "5";
     } else {
       document.getElementById("receptor-nombre").placeholder = "Nombre completo o Razón Social";
+      docInput.placeholder = "Ej: 20-12345678-9 o 30-71234567-8";
     }
   });
 
@@ -299,32 +307,62 @@ function setupReceptorListeners() {
 
 async function consultarPadron() {
   const docInput = document.getElementById("receptor-doc-nro");
-  const cuit = docInput.value.replace(/\D/g, "");
+  const docTipoSelect = document.getElementById("receptor-doc-tipo");
+  const num = docInput.value.replace(/\D/g, "");
   const feedback = document.getElementById("padron-feedback");
   const spinner = document.getElementById("padron-spinner");
+  const docTipo = docTipoSelect.value;
 
-  if (cuit.length !== 11) {
-    feedback.textContent = "Ingrese un CUIT válido de 11 dígitos.";
+  if (!num) {
+    feedback.textContent = docTipo === "96"
+      ? "Ingrese un número de DNI para buscar."
+      : "Ingrese un número de CUIT o DNI para buscar.";
+    feedback.style.color = "var(--accent-rose)";
+    return;
+  }
+
+  const isDni = docTipo === "96" || (num.length >= 6 && num.length <= 8 && docTipo !== "80" && docTipo !== "86");
+  const isCuit = num.length === 11;
+
+  if (docTipo === "96") {
+    if (num.length < 6 || num.length > 8) {
+      feedback.textContent = "Ingrese un DNI válido de 7 u 8 dígitos.";
+      feedback.style.color = "var(--accent-rose)";
+      return;
+    }
+  } else if (!isCuit && !(num.length >= 6 && num.length <= 8)) {
+    feedback.textContent = "Ingrese un CUIT válido de 11 dígitos o un DNI de 7 a 8 dígitos.";
     feedback.style.color = "var(--accent-rose)";
     return;
   }
 
   spinner.classList.remove("hidden");
-  feedback.textContent = "Consultando Padrón A13 de AFIP...";
+  feedback.textContent = (docTipo === "96" || num.length <= 8)
+    ? "Buscando en Padrón AFIP por DNI..."
+    : "Consultando Padrón A13 de AFIP...";
   feedback.style.color = "var(--accent-cyan)";
 
   try {
-    const res = await fetch(`/api/padron/${cuit}`);
+    const res = await fetch(`/api/padron/${num}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "Error en padrón");
 
     if (data.nombre) {
       document.getElementById("receptor-nombre").value = data.nombre;
-      feedback.textContent = `Padrón AFIP: ${data.nombre} ✓`;
+      if (data.cuit && data.cuit !== num) {
+        feedback.textContent = `Padrón AFIP: ${data.nombre} (CUIL: ${data.cuit}) ✓`;
+      } else {
+        feedback.textContent = `Padrón AFIP: ${data.nombre} ✓`;
+      }
       feedback.style.color = "var(--accent-emerald)";
     }
     if (data.domicilio) {
       document.getElementById("receptor-domicilio").value = data.domicilio;
+    }
+    if (activeLetra === "A" && docTipo === "96" && data.cuit) {
+      docTipoSelect.value = "80";
+      docInput.value = data.cuit;
+      feedback.textContent = `Padrón AFIP: ${data.nombre} (CUIT ${data.cuit} asignado para Factura A) ✓`;
     }
   } catch (err) {
     feedback.textContent = `Advertencia: ${err.message}`;

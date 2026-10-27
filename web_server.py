@@ -614,11 +614,13 @@ def test_afip_connection(env: Optional[str] = Query(None)):
 
 @app.get("/api/padron/{cuit}")
 def get_padron_persona(cuit: str, env: Optional[str] = Query(None)):
-    """Consulta los datos de una persona o empresa en el Padrón A13 de AFIP."""
-    cuit_clean = cuit.strip().replace("-", "").replace(" ", "")
-    ok, err = validar_formato_cuit(cuit_clean)
-    if not ok:
-        raise HTTPException(status_code=400, detail=err)
+    """Consulta los datos de una persona o empresa en el Padrón A13 de AFIP (por CUIT o DNI)."""
+    cuit_clean = cuit.strip().replace("-", "").replace(" ", "").replace(".", "")
+    is_dni = 6 <= len(cuit_clean) <= 8 and cuit_clean.isdigit()
+    if not is_dni:
+        ok, err = validar_formato_cuit(cuit_clean)
+        if not ok:
+            raise HTTPException(status_code=400, detail=err)
 
     # El Padrón A13 es una consulta pública de sólo lectura (sin impacto fiscal).
     # Si hay certificados de producción disponibles, usamos PRODUCCIÓN para obtener nombres reales,
@@ -637,7 +639,8 @@ def get_padron_persona(cuit: str, env: Optional[str] = Query(None)):
         cfg = load_config(env=target_env, dry_run=False)
         datos = buscar_persona(cfg, cuit_clean)
         if not datos:
-            raise HTTPException(status_code=404, detail="CUIT no encontrado en el padrón AFIP.")
+            tipo_doc = "DNI" if is_dni else "CUIT"
+            raise HTTPException(status_code=404, detail=f"{tipo_doc} no encontrado en el padrón AFIP.")
         return datos
     except HTTPException:
         raise

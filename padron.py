@@ -35,23 +35,70 @@ def _get_padron_token(config: Config) -> tuple[str, str]:
     return token, sign
 
 
-def buscar_persona(config: Config, cuit: str) -> dict | None:
+def generar_candidatos_cuil(dni: str) -> list[str]:
     """
-    Busca datos de una persona/empresa por CUIT en el padrón A13.
-    Retorna dict con 'nombre', 'domicilio', 'actividad', etc. o None si no se encuentra.
+    Genera los posibles números de CUIT/CUIL para un DNI dado
+    (probando prefijos 20, 27, 23, 24 y calculando el dígito verificador).
     """
+    dni_clean = str(dni).strip().replace(".", "").replace("-", "").replace(" ", "")
+    if not dni_clean.isdigit() or not (6 <= len(dni_clean) <= 8):
+        return []
+    dni_8 = dni_clean.zfill(8)
+    weights = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]
+    candidatos = []
+
+    def calc_check(prefix: int) -> int | None:
+        base = f"{prefix}{dni_8}"
+        total = sum(int(d) * w for d, w in zip(base, weights))
+        r = total % 11
+        if r == 0:
+            return 0
+        elif r == 1:
+            return None
+        return 11 - r
+
+    # 1. Prefijo 20 (masculino)
+    c20 = calc_check(20)
+    if c20 is not None:
+        candidatos.append(f"20{dni_8}{c20}")
+    else:
+        candidatos.append(f"23{dni_8}9")
+
+    # 2. Prefijo 27 (femenino)
+    c27 = calc_check(27)
+    if c27 is not None:
+        candidatos.append(f"27{dni_8}{c27}")
+    else:
+        candidatos.append(f"23{dni_8}4")
+
+    # 3. Prefijo 23 (colisión o caso general)
+    c23 = calc_check(23)
+    if c23 is not None:
+        candidatos.append(f"23{dni_8}{c23}")
+
+    # 4. Prefijo 24 (casos especiales)
+    c24 = calc_check(24)
+    if c24 is not None:
+        candidatos.append(f"24{dni_8}{c24}")
+
+    return list(dict.fromkeys(candidatos))
+
+
+def _buscar_cuit_directo(client, token: str, sign: str, cuit_representada: int, cuit_target: str) -> dict | None:
     import zeep
 
-    token, sign = _get_padron_token(config)
-    transport = build_transport(config.wsdl_cache_path)
-    client = zeep.Client(wsdl=_WSDL[config.env], transport=transport)
-
-    resp = client.service.getPersona(
-        token=token,
-        sign=sign,
-        cuitRepresentada=int(config.cuit),
-        idPersona=int(cuit),
-    )
+    try:
+        resp = client.service.getPersona(
+            token=token,
+            sign=sign,
+            cuitRepresentada=cuit_representada,
+            idPersona=int(cuit_target),
+        )
+    except zeep.exceptions.Fault as e:
+        msg = str(e).lower()
+        if "inexistente" in msg or "no es valido" in msg or "no existe" in msg:
+            return None
+        raise
 
     if resp is None or not hasattr(resp, "persona") or resp.persona is None:
         return None
@@ -108,9 +155,50 @@ def buscar_persona(config: Config, cuit: str) -> dict | None:
 
     return {
         "nombre": nombre,
-        "cuit": cuit,
+        "cuit": cuit_target,
         "tipo_persona": getattr(p, "tipoPersona", None),
         "actividad": getattr(p, "descripcionActividadPrincipal", None),
         "domicilio": dom_str,
         "localidad": getattr(domicilio_fiscal, "descripcionProvincia", None) if domicilio_fiscal else None,
     }
+
+
+def buscar_persona(config: Config, cuit: str) -> dict | None:
+    """
+    Busca datos de una persona/empresa por CUIT o DNI en el padrón A13.
+    - Si se pasa un CUIT (11 dígitos), consulta directamente por ese CUIT.
+    - Si se pasa un DNI (6 a 8 dígitos), genera candidatos de CUIL (20, 27, 23, 24)
+      y consulta hasta encontrar el registro correspondiente en AFIP.
+    Retorna dict con 'nombre', 'domicilio', 'actividad', etc. o None si no se encuentra.
+    """
+    import zeep
+
+    clean = str(cuit or "").strip().replace("-", "").replace(" ", "").replace(".", "")
+    if not clean.isdigit():
+        return None
+
+    token, sign = _get_padron_token(config)
+    transport = build_transport(config.wsdl_cache_path)
+    client = zeep.Client(wsdl=_WSDL[config.env], transport=transport)
+    cuit_rep = int(config.cuit)
+
+    if len(clean) == 11:
+        return _buscar_cuit_directo(client, token, sign, cuit_rep, clean)
+
+    if 6 <= len(clean) <= 8:
+        candidatos = generar_candidatos_cuil(clean)
+        for cand in candidatos:
+            try:
+                res = _buscar_cuit_directo(client, token, sign, cuit_rep, cand)
+                if res and res.get("nombre"):
+                    res["dni"] = clean
+                    return res
+            except zeep.exceptions.Fault as e:
+                msg = str(e).lower()
+                if "inexistente" in msg or "no es valido" in msg or "no existe" in msg:
+                    continue
+                raise
+            except Exception:
+                continue
+
+    return None
