@@ -384,7 +384,10 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
 
     # Nombre del receptor
     by2 = y - 5.5 * mm
-    nombre_receptor = resp.nombre_cliente or "Consumidor Final"
+    if is_consumidor_final(resp.nombre_cliente):
+        nombre_receptor = ""
+    else:
+        nombre_receptor = resp.nombre_cliente or ""
     right_col_w = CONTENT_W - BLEFT_W - 6 * mm
     lbl_rs = "Apellido y Nombre / Razón Social:  "
     lbl_w = c.stringWidth(lbl_rs, "Helvetica-Bold", fs)

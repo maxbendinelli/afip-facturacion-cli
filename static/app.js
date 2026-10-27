@@ -271,8 +271,13 @@ function setupReceptorListeners() {
   docTipoSelect.addEventListener("change", (e) => {
     if (e.target.value === "99") {
       docInput.value = "";
-      document.getElementById("receptor-nombre").value = "Consumidor Final";
+      if (document.getElementById("receptor-nombre").value === "Consumidor Final") {
+        document.getElementById("receptor-nombre").value = "";
+      }
+      document.getElementById("receptor-nombre").placeholder = "Sin identificar (o ingrese Nombre)";
       condIvaSelect.value = "5";
+    } else {
+      document.getElementById("receptor-nombre").placeholder = "Nombre completo o Razón Social";
     }
   });
 
@@ -280,9 +285,6 @@ function setupReceptorListeners() {
     const val = e.target.value;
     if (val === "5" && !docInput.value.trim()) {
       docTipoSelect.value = "99";
-      if (!document.getElementById("receptor-nombre").value.trim()) {
-        document.getElementById("receptor-nombre").value = "Consumidor Final";
-      }
     } else if (["1", "4", "6", "7", "8", "9", "10", "13", "15", "16"].includes(val)) {
       if (docTipoSelect.value === "99") {
         docTipoSelect.value = "80";
@@ -581,7 +583,7 @@ async function emitirFactura() {
     showToast("Para Factura A debe ingresar el CUIT del receptor.", "error");
     return;
   }
-  if (!nombre) {
+  if (!nombre && docTipo !== 99) {
     showToast("Debe ingresar el nombre o razón social del cliente.", "error");
     return;
   }
@@ -628,7 +630,7 @@ async function emitirFactura() {
     cbte_tipo: activeCbteTipo,
     doc_tipo: docTipo,
     cuit_cliente: docTipo === 99 ? "0" : docNro,
-    nombre_cliente: nombre,
+    nombre_cliente: nombre || (docTipo === 99 ? "Consumidor Final" : ""),
     domicilio_cliente: domicilio || null,
     concepto_afip: parseInt(document.getElementById("op-concepto").value),
     condicion_iva_receptor: parseInt(condIvaVal),
