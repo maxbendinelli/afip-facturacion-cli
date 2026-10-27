@@ -33,6 +33,13 @@ class Config:
     inicio_actividades: str = ""
     ingresos_brutos: str = ""
     limite_consumidor_final: Decimal = field(default_factory=lambda: Decimal("97673.32"))
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_security: str = "tls"  # "tls", "ssl", "none"
+    smtp_from_name: str = ""
+    smtp_from_email: str = ""
 
     @property
     def wsaa_url(self) -> str:
@@ -137,6 +144,13 @@ def load_config(env: str = "homo", dry_run: bool = False) -> Config:
         inicio_actividades=os.getenv("AFIP_INICIO_ACTIVIDADES", ""),
         ingresos_brutos=os.getenv("AFIP_INGRESOS_BRUTOS", ""),
         limite_consumidor_final=limite_cf,
+        smtp_host=os.getenv("SMTP_HOST", ""),
+        smtp_port=int(os.getenv("SMTP_PORT", "587")) if os.getenv("SMTP_PORT", "").isdigit() else 587,
+        smtp_user=os.getenv("SMTP_USER", ""),
+        smtp_password=os.getenv("SMTP_PASSWORD", ""),
+        smtp_security=os.getenv("SMTP_SECURITY", "tls").lower(),
+        smtp_from_name=os.getenv("SMTP_FROM_NAME", ""),
+        smtp_from_email=os.getenv("SMTP_FROM_EMAIL", ""),
     )
 
 

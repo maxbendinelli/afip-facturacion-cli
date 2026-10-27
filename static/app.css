@@ -1037,6 +1037,12 @@ textarea:focus {
   overflow: hidden;
 }
 
+.modal-dialog-sm {
+  max-width: 520px !important;
+  height: auto !important;
+  max-height: 90vh;
+}
+
 .modal-header {
   padding: 1rem 1.5rem;
   border-bottom: 1px solid var(--border-color);

@@ -233,6 +233,19 @@
                   <input type="text" id="receptor-domicilio" placeholder="Av. Corrientes 1234, CABA">
                 </div>
               </div>
+
+              <div class="form-row form-row-2">
+                <div class="form-group">
+                  <label for="receptor-email">Correo Electrónico del Receptor (Opcional)</label>
+                  <input type="email" id="receptor-email" placeholder="cliente@correo.com">
+                </div>
+                <div class="form-group" style="display: flex; align-items: flex-end; padding-bottom: 8px;">
+                  <label class="checkbox-label" style="cursor: pointer; display: flex; align-items: center; gap: 8px; margin: 0;">
+                    <input type="checkbox" id="chk-enviar-email" checked>
+                    <span style="font-weight: 500; font-size: 0.85rem;">✉ Enviar factura por email al emitir</span>
+                  </label>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -464,6 +477,10 @@
               </div>
               <input type="checkbox" id="chk-lote-duplicado" style="display:none;">
               <input type="checkbox" id="chk-lote-triplicado" style="display:none;">
+              <label class="checkbox-label" style="display:flex; align-items:center; gap:6px; font-size:0.82rem; font-weight:600; cursor:pointer; color:var(--text-main); margin:0;">
+                <input type="checkbox" id="chk-lote-enviar-email" checked>
+                <span>✉ Enviar por Email (si tiene correo)</span>
+              </label>
               <button type="button" class="btn btn-primary" id="btn-emitir-lote">
                 <span class="spinner hidden" id="lote-spinner"></span>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
@@ -490,7 +507,7 @@
                     <th>#</th>
                     <th>Tipo</th>
                     <th>Documento</th>
-                    <th>Receptor</th>
+                    <th>Receptor / Email</th>
                     <th>Concepto</th>
                     <th>Neto</th>
                     <th>IVA</th>
@@ -806,6 +823,64 @@
                 </div>
               </div>
 
+              <!-- SECCIÓN DE CONFIGURACIÓN SMTP (EMAIL) -->
+              <div class="section-divider">Configuración de Envío de Facturas por Correo Electrónico (SMTP)</div>
+
+              <div class="custom-design-box">
+                <div class="form-row form-row-3">
+                  <div class="form-group">
+                    <label for="cfg-smtp-host">Servidor SMTP (Host)</label>
+                    <input type="text" id="cfg-smtp-host" placeholder="Ej: smtp.gmail.com o mail.empresa.com">
+                  </div>
+                  <div class="form-group">
+                    <label for="cfg-smtp-port">Puerto SMTP</label>
+                    <input type="number" id="cfg-smtp-port" placeholder="587 o 465">
+                  </div>
+                  <div class="form-group">
+                    <label for="cfg-smtp-security">Seguridad / Encriptación</label>
+                    <select id="cfg-smtp-security">
+                      <option value="tls" selected>STARTTLS (Puerto 587 habitual)</option>
+                      <option value="ssl">SSL / TLS Directo (Puerto 465 habitual)</option>
+                      <option value="none">Sin cifrado (Puerto 25)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="form-row form-row-2">
+                  <div class="form-group">
+                    <label for="cfg-smtp-user">Usuario / Cuenta de Correo</label>
+                    <input type="text" id="cfg-smtp-user" placeholder="ejemplo@gmail.com">
+                  </div>
+                  <div class="form-group">
+                    <label for="cfg-smtp-password">Contraseña o Clave de Aplicación</label>
+                    <input type="password" id="cfg-smtp-password" placeholder="Contraseña SMTP o App Password">
+                    <small style="color:var(--text-muted); font-size:11px; display:block; margin-top:3px;">
+                      Para Gmail/Outlook genere una "Contraseña de aplicación" en su cuenta de Google o Microsoft.
+                    </small>
+                  </div>
+                </div>
+
+                <div class="form-row form-row-2">
+                  <div class="form-group">
+                    <label for="cfg-smtp-from-name">Nombre Visible del Remitente</label>
+                    <input type="text" id="cfg-smtp-from-name" placeholder="Ej: Facturación - Mi Empresa">
+                  </div>
+                  <div class="form-group">
+                    <label for="cfg-smtp-from-email">Email del Remitente (From)</label>
+                    <input type="email" id="cfg-smtp-from-email" placeholder="facturacion@empresa.com (si difiere del usuario)">
+                  </div>
+                </div>
+
+                <div class="preview-sample-bar" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                  <input type="email" id="test-smtp-email" placeholder="correo-destino@ejemplo.com" style="max-width: 280px; padding: 0.5rem 0.75rem; font-size: 0.85rem; border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text-main); border: 1px solid var(--border-color);">
+                  <button type="button" class="btn btn-secondary" id="btn-test-smtp">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+                    Enviar Correo de Prueba
+                  </button>
+                  <span id="smtp-test-status" style="font-size:0.85rem; font-weight:500;"></span>
+                </div>
+              </div>
+
               <div class="form-actions-bar">
                 <button type="button" class="btn btn-secondary" id="btn-test-conexion">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
@@ -928,6 +1003,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
             Actualizar Diseño PDF
           </button>
+          <button type="button" class="btn btn-secondary" id="btn-modal-send-email" title="Enviar este comprobante por correo electrónico">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+            Enviar por Email
+          </button>
           <button type="button" class="btn btn-primary" id="btn-print-modal">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
             Imprimir Comprobante
@@ -941,6 +1020,40 @@
       </div>
       <div class="modal-body">
         <iframe id="pdf-viewer-frame" src="about:blank"></iframe>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL DE ENVÍO DE EMAIL -->
+  <div class="modal-backdrop hidden" id="modal-email">
+    <div class="modal-dialog modal-dialog-sm">
+      <div class="modal-header">
+        <div class="modal-title-box">
+          <h3>Enviar Factura por Email</h3>
+          <span class="modal-subtitle" id="modal-email-subtitle">Comprobante</span>
+        </div>
+        <button type="button" class="btn-close" id="btn-close-modal-email">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 1.5rem;">
+        <form id="form-send-email">
+          <input type="hidden" id="modal-email-pdf">
+          <div class="form-group" style="margin-bottom: 1rem;">
+            <label for="modal-email-destinatario">Correo del Destinatario <span class="required">*</span></label>
+            <input type="email" id="modal-email-destinatario" required placeholder="cliente@correo.com">
+          </div>
+          <div class="form-group" style="margin-bottom: 1.5rem;">
+            <label for="modal-email-nota">Mensaje Personalizado (Opcional)</label>
+            <textarea id="modal-email-nota" rows="2" placeholder="Ej: Estimado cliente, adjuntamos la factura correspondiente a su compra."></textarea>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px;">
+            <button type="button" class="btn btn-secondary" id="btn-cancel-modal-email">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-modal-email">
+              <span class="spinner hidden" id="email-send-spinner"></span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+              Enviar Ahora
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   </div>

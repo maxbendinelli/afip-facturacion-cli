@@ -36,6 +36,7 @@ from models import (
 )
 from padron import buscar_persona
 from pdf_generator import generate_pdf, format_pdf_filename
+from mailer import send_invoice_email, test_smtp_connection, is_smtp_configured
 from validators import validar_cuit_afip, validar_formato_cuit
 from wsaa import get_token_sign
 from wsfev1 import (
@@ -160,6 +161,8 @@ class EmitirIn(BaseModel):
     copias: int = 1
     env: Optional[str] = None
     dry_run: bool = False
+    email_cliente: Optional[str] = None
+    enviar_email: bool = False
 
 
 class PreviewSampleIn(BaseModel):
@@ -195,6 +198,32 @@ class ConfigIn(BaseModel):
     key_path_homo: Optional[str] = ""
     cert_path_prod: Optional[str] = ""
     key_path_prod: Optional[str] = ""
+    smtp_host: Optional[str] = ""
+    smtp_port: Optional[int] = 587
+    smtp_user: Optional[str] = ""
+    smtp_password: Optional[str] = ""
+    smtp_security: Optional[str] = "tls"
+    smtp_from_name: Optional[str] = ""
+    smtp_from_email: Optional[str] = ""
+
+
+class SmtpTestIn(BaseModel):
+    recipient: Optional[str] = None
+    email_to: Optional[str] = None
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_user: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_security: Optional[str] = None
+    smtp_from_name: Optional[str] = None
+    smtp_from_email: Optional[str] = None
+
+
+class EnviarEmailIn(BaseModel):
+    email: str
+    pdf_filename: str
+    asunto: Optional[str] = None
+    mensaje: Optional[str] = None
 
 
 class CsrIn(BaseModel):
@@ -217,6 +246,7 @@ class LoteRowIn(BaseModel):
     cbte_tipo: int = 11
     cuit_cliente: str = "SIN_CUIT"
     nombre_cliente: str = "Consumidor Final"
+    email: Optional[str] = None
     domicilio_cliente: Optional[str] = None
     concepto: str = "Servicio"
     monto: float = 0.0
@@ -243,6 +273,7 @@ class LoteEmitirIn(BaseModel):
     duplicado: bool = False
     triplicado: bool = False
     copias: int = 1
+    enviar_email: bool = False
 
 
 
@@ -391,6 +422,14 @@ def get_config():
         "key_path_prod": key_prod,
         "cert_prod_exists": os.path.isfile(cert_prod) if cert_prod else False,
         "key_prod_exists": os.path.isfile(key_prod) if key_prod else False,
+        "smtp_host": cfg.smtp_host if cfg else os.getenv("SMTP_HOST", ""),
+        "smtp_port": cfg.smtp_port if cfg else int(os.getenv("SMTP_PORT", "587")),
+        "smtp_user": cfg.smtp_user if cfg else os.getenv("SMTP_USER", ""),
+        "smtp_password": cfg.smtp_password if cfg else os.getenv("SMTP_PASSWORD", ""),
+        "smtp_security": cfg.smtp_security if cfg else os.getenv("SMTP_SECURITY", "tls"),
+        "smtp_from_name": cfg.smtp_from_name if cfg else os.getenv("SMTP_FROM_NAME", ""),
+        "smtp_from_email": cfg.smtp_from_email if cfg else os.getenv("SMTP_FROM_EMAIL", ""),
+        "smtp_configured": bool(cfg.smtp_host and cfg.smtp_user and cfg.smtp_password) if cfg else bool(os.getenv("SMTP_HOST") and os.getenv("SMTP_USER")),
     }
 
 
@@ -416,6 +455,13 @@ def update_config(payload: ConfigIn):
         "AFIP_INICIO_ACTIVIDADES": payload.inicio_actividades or "",
         "AFIP_INGRESOS_BRUTOS": payload.ingresos_brutos or "",
         "AFIP_LIMITE_CF": str(payload.limite_cf or 97673.32),
+        "SMTP_HOST": (payload.smtp_host or "").strip(),
+        "SMTP_PORT": str(payload.smtp_port or 587),
+        "SMTP_USER": (payload.smtp_user or "").strip(),
+        "SMTP_PASSWORD": (payload.smtp_password or "").strip(),
+        "SMTP_SECURITY": (payload.smtp_security or "tls").strip().lower(),
+        "SMTP_FROM_NAME": (payload.smtp_from_name or "").strip(),
+        "SMTP_FROM_EMAIL": (payload.smtp_from_email or "").strip(),
     }
 
     if payload.cert_path_homo:
@@ -441,6 +487,91 @@ def get_condiciones_iva():
         "emisor": [{"id": k, "nombre": v} for k, v in COND_IVA_EMISOR.items()],
         "receptor": [{"id": k, "nombre": v} for k, v in COND_IVA_RECEPTOR.items()],
     }
+
+
+@app.post("/api/config/smtp-test")
+def api_test_smtp(payload: SmtpTestIn):
+    """Prueba la conexión y credenciales SMTP enviando un correo de prueba."""
+    try:
+        cfg = load_config()
+        if payload.smtp_host is not None:
+            cfg.smtp_host = payload.smtp_host
+        if payload.smtp_port is not None:
+            cfg.smtp_port = payload.smtp_port
+        if payload.smtp_user is not None:
+            cfg.smtp_user = payload.smtp_user
+        if payload.smtp_password is not None:
+            cfg.smtp_password = payload.smtp_password
+        if payload.smtp_security is not None:
+            cfg.smtp_security = payload.smtp_security
+        if payload.smtp_from_name is not None:
+            cfg.smtp_from_name = payload.smtp_from_name
+        if payload.smtp_from_email is not None:
+            cfg.smtp_from_email = payload.smtp_from_email
+
+        recipient = payload.email_to or payload.recipient
+        if not recipient:
+            raise HTTPException(status_code=400, detail="Debe indicar el correo destinatario para la prueba.")
+
+        res = test_smtp_connection(cfg, recipient)
+        if not res.get("ok"):
+            raise HTTPException(status_code=400, detail=res.get("error", "Error desconocido enviando correo de prueba."))
+        return res
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/comprobantes/enviar-email")
+def api_enviar_email_comprobante(payload: EnviarEmailIn, env: Optional[str] = Query(None)):
+    """Envía o reenvía una factura existente por correo electrónico."""
+    target_env = env or os.getenv("AFIP_ENV", "homo").lower()
+    cfg = load_config(env=target_env, dry_run=False)
+
+    clean_name = os.path.basename(payload.pdf_filename)
+    pdf_path = COMPROBANTES_DIR / clean_name
+    if not pdf_path.exists():
+        pdf_path = BASE_DIR / clean_name
+    if not pdf_path.exists():
+        raise HTTPException(status_code=404, detail=f"Archivo PDF '{clean_name}' no encontrado.")
+
+    # Buscar metadatos del comprobante si existe json
+    invoice_data = {}
+    found_json = None
+    for j in COMPROBANTES_DIR.glob("*.json"):
+        try:
+            with open(j, "r", encoding="utf-8") as f:
+                d = json.load(f)
+                if d.get("pdf_filename") == clean_name:
+                    invoice_data = d
+                    found_json = j
+                    break
+        except Exception:
+            continue
+
+    if not invoice_data:
+        invoice_data = {
+            "comprobante": clean_name.replace(".pdf", ""),
+            "monto": "",
+            "cae": "",
+            "cae_vencimiento": "",
+        }
+
+    res = send_invoice_email(cfg, payload.email, invoice_data, pdf_path, custom_subject=payload.asunto, custom_message=payload.mensaje)
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res.get("error", "Error enviando correo."))
+
+    if found_json and found_json.exists():
+        try:
+            invoice_data["email_cliente"] = payload.email
+            invoice_data["email_enviado"] = True
+            with open(found_json, "w", encoding="utf-8") as f:
+                json.dump(invoice_data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    return res
 
 
 @app.post("/api/config/test")
@@ -787,6 +918,8 @@ def emitir_comprobante(payload: EmitirIn):
             "env": target_env,
             "pdf_filename": pdf_name,
             "url": f"/api/pdf/{pdf_name}",
+            "email_cliente": payload.email_cliente,
+            "email_enviado": True if (payload.enviar_email and payload.email_cliente) else None,
         }
 
     try:
@@ -874,6 +1007,14 @@ def emitir_comprobante(payload: EmitirIn):
     resp_dict["pdf_filename"] = pdf_filename
     resp_dict["env"] = target_env
 
+    # Envío de correo electrónico si fue solicitado
+    if payload.enviar_email and payload.email_cliente and not payload.dry_run:
+        mail_res = send_invoice_email(cfg, payload.email_cliente, resp_dict, pdf_path)
+        resp_dict["email_cliente"] = payload.email_cliente
+        resp_dict["email_enviado"] = mail_res.get("ok", False)
+        if not mail_res.get("ok"):
+            resp_dict["email_error"] = mail_res.get("error")
+
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(resp_dict, f, ensure_ascii=False, indent=2)
 
@@ -887,11 +1028,11 @@ def emitir_comprobante(payload: EmitirIn):
 def get_csv_template():
     """Retorna un archivo CSV modelo con ejemplos para descargar."""
     content = (
-        "tipo,cuit_cliente,nombre_cliente,domicilio,concepto,monto,alicuota_iva,condicion_iva\n"
-        "C,20123456789,Juan Perez,Av. Rivadavia 1234 - CABA,Servicio de consultoria,15000,0,CF\n"
-        "B,SIN_CUIT,Consumidor Final,,Articulos de libreria,24200,21,CF\n"
-        "A,30712345671,Empresa SA,San Martin 456 - Rosario,Desarrollo de software,50000,21,RI\n"
-        "C,27234567894,Maria Gomez,Belgrano 789 - Cordoba,Diseno web,35000,0,MONO\n"
+        "tipo,cuit_cliente,nombre_cliente,email,domicilio,concepto,monto,alicuota_iva,condicion_iva\n"
+        "C,20123456789,Juan Perez,juan.perez@ejemplo.com,Av. Rivadavia 1234 - CABA,Servicio de consultoria,15000,0,CF\n"
+        "B,SIN_CUIT,Consumidor Final,,,Articulos de libreria,24200,21,CF\n"
+        "A,30712345671,Empresa SA,administracion@empresa.com,San Martin 456 - Rosario,Desarrollo de software,50000,21,RI\n"
+        "C,27234567894,Maria Gomez,maria.gomez@ejemplo.com,Belgrano 789 - Cordoba,Diseno web,35000,0,MONO\n"
     )
     return Response(
         content=content,
@@ -963,6 +1104,8 @@ async def parse_lote_csv(file: UploadFile = File(...)):
         c = c.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
         if "destinatario" in c or "apellido_y_nombre" in c:
             return "nombre_cliente"
+        if "mail" in c or "correo" in c:
+            return "email"
         if "domicilio" in c or "direccion" in c:
             return "domicilio_cliente"
         if "dni" in c or "cuit" in c:
@@ -1182,6 +1325,7 @@ async def parse_lote_csv(file: UploadFile = File(...)):
             "doc_tipo": doc_tipo,
             "doc_nro": doc_nro,
             "nombre_cliente": nombre or "Consumidor Final",
+            "email": (raw_row.get("email") or raw_row.get("correo") or "").strip() or None,
             "domicilio_cliente": domicilio or None,
             "concepto": concepto,
             "monto": monto,
@@ -1338,6 +1482,9 @@ def emitir_lote(payload: LoteEmitirIn):
 
                 resp_dict = resp_sim.to_json()
                 resp_dict["pdf_filename"] = pdf_name
+                if item.email:
+                    resp_dict["email_cliente"] = item.email
+                    resp_dict["email_enviado"] = True if payload.enviar_email else None
                 with open(COMPROBANTES_DIR / f"comprobante_{letra}_{pv:04d}_sim_{item.index:04d}.json", "w", encoding="utf-8") as f:
                     json.dump(resp_dict, f, ensure_ascii=False)
 
@@ -1351,6 +1498,8 @@ def emitir_lote(payload: LoteEmitirIn):
                     "cae_vencimiento": (hoy_dt + timedelta(days=10)).strftime("%Y%m%d"),
                     "monto": str(monto_dec),
                     "cliente": item.nombre_cliente,
+                    "email": item.email,
+                    "email_enviado": True if (payload.enviar_email and item.email) else None,
                     "pdf_filename": pdf_name,
                     "url": f"/api/pdf/{pdf_name}",
                 })
@@ -1427,6 +1576,17 @@ def emitir_lote(payload: LoteEmitirIn):
 
             resp_dict = resp.to_json()
             resp_dict["pdf_filename"] = pdf_name
+
+            # Envío de correo en lote si fue solicitado
+            mail_ok = None
+            if payload.enviar_email and item.email and not payload.dry_run:
+                mail_res = send_invoice_email(cfg, item.email, resp_dict, COMPROBANTES_DIR / pdf_name)
+                mail_ok = mail_res.get("ok", False)
+                resp_dict["email_cliente"] = item.email
+                resp_dict["email_enviado"] = mail_ok
+                if not mail_ok:
+                    resp_dict["email_error"] = mail_res.get("error")
+
             with open(COMPROBANTES_DIR / f"comprobante_{letra}_{resp.punto_venta:04d}_{resp.numero:08d}.json", "w") as f:
                 json.dump(resp_dict, f, ensure_ascii=False)
 
@@ -1439,6 +1599,8 @@ def emitir_lote(payload: LoteEmitirIn):
                 "cae_vencimiento": resp.cae_vencimiento,
                 "monto": str(resp.monto),
                 "cliente": resp.nombre_cliente,
+                "email": item.email,
+                "email_enviado": mail_ok,
                 "pdf_filename": pdf_name,
             })
             exitosos += 1

@@ -64,6 +64,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupCertPickers();
   setupPdfCustomization();
   setupLotesTab();
+  setupSendEmailModal();
 
   // Fechas por defecto
   document.getElementById("op-fecha").value = getTodayStr();
@@ -644,6 +645,8 @@ async function emitirFactura() {
     triplicado: (parseInt(document.getElementById("sel-ejemplares")?.value || "1") >= 3),
     copias: parseInt(document.getElementById("sel-ejemplares")?.value || (document.getElementById("chk-duplicado")?.checked ? "2" : "1")),
     dry_run: document.getElementById("chk-dry-run").checked,
+    email_cliente: document.getElementById("receptor-email")?.value.trim() || null,
+    enviar_email: document.getElementById("chk-enviar-email")?.checked || false,
   };
 
   if (document.getElementById("asociado-box").classList.contains("hidden") === false) {
@@ -670,7 +673,13 @@ async function emitirFactura() {
       return;
     }
 
-    showToast(`Comprobante ${data.comprobante} emitido con éxito!`, "success");
+    let emitMsg = `Comprobante ${data.comprobante} emitido con éxito!`;
+    if (data.email_enviado === true) {
+      emitMsg += ` Y enviado por email a ${payload.email_cliente}.`;
+    } else if (data.email_enviado === false) {
+      emitMsg += ` (Aviso: falló el envío por email: ${data.email_error || ''})`;
+    }
+    showToast(emitMsg, data.email_enviado === false ? "warn" : "success");
     openPdfModal(data);
     loadHistorial();
   } catch (err) {
@@ -733,6 +742,93 @@ function setupModalActions() {
       }
     });
   }
+
+  const btnModalEmail = document.getElementById("btn-modal-send-email");
+  if (btnModalEmail) {
+    btnModalEmail.addEventListener("click", () => {
+      if (!currentModalCbte || !currentModalCbte.pdf_filename) {
+        showToast("No hay comprobante disponible para enviar por email.", "error");
+        return;
+      }
+      openSendEmailModal(
+        currentModalCbte.pdf_filename,
+        currentModalCbte.email_cliente || currentModalCbte.email || "",
+        `${currentModalCbte.tipo || "Comprobante"} ${currentModalCbte.comprobante || ""}`
+      );
+    });
+  }
+}
+
+function setupSendEmailModal() {
+  const modal = document.getElementById("modal-email");
+  const btnClose = document.getElementById("btn-close-modal-email");
+  const btnCancel = document.getElementById("btn-cancel-modal-email");
+  const form = document.getElementById("form-send-email");
+
+  const closeModal = () => modal.classList.add("hidden");
+  if (btnClose) btnClose.addEventListener("click", closeModal);
+  if (btnCancel) btnCancel.addEventListener("click", closeModal);
+  if (modal) {
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) closeModal();
+    });
+  }
+
+  if (form) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const pdf = document.getElementById("modal-email-pdf").value;
+      const email = document.getElementById("modal-email-destinatario").value.trim();
+      const nota = document.getElementById("modal-email-nota").value.trim();
+      const spinner = document.getElementById("email-send-spinner");
+      const btnSubmit = document.getElementById("btn-submit-modal-email");
+
+      if (!pdf || !email) {
+        showToast("Debe ingresar un email válido.", "error");
+        return;
+      }
+
+      btnSubmit.disabled = true;
+      spinner.classList.remove("hidden");
+
+      try {
+        const res = await fetch("/api/comprobantes/enviar-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pdf_filename: pdf,
+            email: email,
+            mensaje: nota || null,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Error enviando correo");
+
+        showToast(data.message || `Factura enviada exitosamente a ${email}`, "success");
+        closeModal();
+        loadHistorial();
+      } catch (err) {
+        showToast(`Error al enviar correo: ${err.message}`, "error");
+      } finally {
+        btnSubmit.disabled = false;
+        spinner.classList.add("hidden");
+      }
+    });
+  }
+}
+
+function openSendEmailModal(pdfFilename, defaultEmail, title) {
+  const modal = document.getElementById("modal-email");
+  if (!modal) return;
+  document.getElementById("modal-email-pdf").value = pdfFilename || "";
+  document.getElementById("modal-email-destinatario").value = defaultEmail || "";
+  document.getElementById("modal-email-nota").value = "";
+  document.getElementById("modal-email-subtitle").textContent = title ? `${title} (${pdfFilename})` : pdfFilename;
+  modal.classList.remove("hidden");
+  setTimeout(() => {
+    const input = document.getElementById("modal-email-destinatario");
+    if (input) input.focus();
+  }, 100);
 }
 
 let currentModalCbte = null;
@@ -884,7 +980,10 @@ function renderLoteTable(rows) {
       <td class="mono-cell">${r.index}</td>
       <td>${tipoBadge}</td>
       <td class="mono-cell">${r.cuit_cliente}</td>
-      <td>${r.nombre_cliente}</td>
+      <td>
+        ${r.nombre_cliente}
+        ${r.email ? `<br><small style="color:var(--text-muted); font-size:0.75rem;">✉ ${r.email}</small>` : ''}
+      </td>
       <td><small>${r.concepto}</small></td>
       <td class="mono-cell">$ ${fmtNum(r.neto)}</td>
       <td class="mono-cell">${r.alicuota_iva > 0 ? `$ ${fmtNum(r.iva)} (${r.alicuota_iva}%)` : '-'}</td>
@@ -954,6 +1053,7 @@ async function emitirLoteActual() {
       duplicado: duplicado,
       triplicado: triplicado,
       copias: copiasLote,
+      enviar_email: document.getElementById("chk-lote-enviar-email")?.checked || false,
     };
 
     const res = await fetch("/api/lotes/emitir", {
@@ -984,9 +1084,19 @@ async function emitirLoteActual() {
       if (row) {
         const statusCell = row.querySelector(".row-status-cell");
         if (resItem.status === "ok") {
+          let mailBadge = "";
+          if (resItem.email) {
+            if (resItem.email_enviado === true) {
+              mailBadge = `<span class="badge" style="background:rgba(16,185,129,0.15);color:#10B981;margin-left:4px;" title="Email enviado a ${resItem.email}">✉ Enviado</span>`;
+            } else if (resItem.email_enviado === false) {
+              mailBadge = `<span class="badge badge-err" style="margin-left:4px;" title="Falló envío de email">✉ Error mail</span>`;
+            }
+          }
           statusCell.innerHTML = `
             <span class="badge badge-ok">Emitido ✓ (${resItem.comprobante})</span>
-            ${resItem.pdf_filename ? `<button class="btn btn-secondary btn-sm" style="margin-left:0.5rem;" onclick="openPdfByName('${resItem.pdf_filename}')">PDF</button>` : ''}
+            ${mailBadge}
+            ${resItem.pdf_filename ? `<button class="btn btn-secondary btn-sm" style="margin-left:0.4rem;" onclick="openPdfByName('${resItem.pdf_filename}')">PDF</button>` : ''}
+            ${resItem.pdf_filename ? `<button class="btn btn-secondary btn-sm" style="margin-left:0.3rem;" onclick="openSendEmailModal('${resItem.pdf_filename}', '${resItem.email || ''}', '${resItem.comprobante || ''}')" title="Enviar por Email">✉</button>` : ''}
           `;
         } else {
           statusCell.innerHTML = `<span class="badge badge-err" title="${resItem.error}">Falló: ${resItem.error}</span>`;
@@ -1251,23 +1361,40 @@ function renderHistorial(list) {
 
   list.forEach((item) => {
     const tr = document.createElement("tr");
+    const mailBadge = item.email_enviado 
+      ? `<span class="badge" style="background:rgba(16,185,129,0.15);color:#10B981;margin-left:4px;" title="Enviado a ${item.email_cliente || ''}">✉</span>` 
+      : (item.email_cliente ? `<span class="badge" style="background:rgba(107,114,128,0.2);color:var(--text-muted);margin-left:4px;" title="Correo registrado: ${item.email_cliente}">✉</span>` : '');
+
     tr.innerHTML = `
       <td class="mono-cell"><strong>${item.comprobante || "-"}</strong></td>
       <td><span class="badge badge-pv">${item.tipo || "Factura"}</span></td>
       <td>${item.fecha || "-"}</td>
-      <td>${item.cliente || "Consumidor Final"}</td>
+      <td>${item.cliente || "Consumidor Final"}${mailBadge}</td>
       <td class="mono-cell">$ ${fmtNum(item.monto)}</td>
       <td class="mono-cell">${item.cae || "-"}</td>
       <td>
-        <button class="btn btn-secondary btn-sm btn-ver-pdf" data-filename="${item.pdf_filename || ""}">
-          Ver / Imprimir
-        </button>
+        <div style="display:flex; gap:6px;">
+          <button class="btn btn-secondary btn-sm btn-ver-pdf" data-filename="${item.pdf_filename || ""}">
+            Ver / Imprimir
+          </button>
+          <button class="btn btn-secondary btn-sm btn-mail-historial" data-filename="${item.pdf_filename || ""}" data-email="${item.email_cliente || ""}" data-cbte="${item.comprobante || ""}" title="Enviar factura por email">
+            ✉ Email
+          </button>
+        </div>
       </td>
     `;
 
     tr.querySelector(".btn-ver-pdf").addEventListener("click", () => {
       if (item.pdf_filename) {
         openPdfModal(item);
+      } else {
+        showToast("PDF no disponible localmente.", "error");
+      }
+    });
+
+    tr.querySelector(".btn-mail-historial").addEventListener("click", () => {
+      if (item.pdf_filename) {
+        openSendEmailModal(item.pdf_filename, item.email_cliente || "", item.comprobante || "");
       } else {
         showToast("PDF no disponible localmente.", "error");
       }
@@ -1423,6 +1550,19 @@ async function loadConfig() {
     document.getElementById("cfg-watermark-text").value = appConfig.watermark_text || "";
     document.getElementById("cfg-watermark-image").value = appConfig.watermark_image || "";
 
+    // SMTP fields
+    const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ""; };
+    setVal("cfg-smtp-host", appConfig.smtp_host);
+    setVal("cfg-smtp-port", appConfig.smtp_port);
+    setVal("cfg-smtp-security", appConfig.smtp_security || "tls");
+    setVal("cfg-smtp-user", appConfig.smtp_user);
+    setVal("cfg-smtp-password", appConfig.smtp_password);
+    setVal("cfg-smtp-from-name", appConfig.smtp_from_name);
+    setVal("cfg-smtp-from-email", appConfig.smtp_from_email);
+    if (!document.getElementById("test-smtp-email").value && appConfig.smtp_user && appConfig.smtp_user.includes("@")) {
+      document.getElementById("test-smtp-email").value = appConfig.smtp_user;
+    }
+
     if (appConfig.logo_path) {
       document.getElementById("logo-preview-box").innerHTML = `<img src="${appConfig.logo_path}" alt="Logo">`;
     }
@@ -1461,6 +1601,11 @@ function setupConfigForm() {
   document.getElementById("btn-test-conexion").addEventListener("click", testConexion);
   document.getElementById("btn-quick-test").addEventListener("click", testConexion);
 
+  const btnTestSmtp = document.getElementById("btn-test-smtp");
+  if (btnTestSmtp) {
+    btnTestSmtp.addEventListener("click", testSmtpConnection);
+  }
+
   document.getElementById("btn-toggle-env-header").addEventListener("click", async () => {
     const nextEnv = appConfig.env === "prod" ? "homo" : "prod";
     const confirmChange = confirm(`¿Desea cambiar el entorno activo a ${nextEnv.toUpperCase()}?`);
@@ -1471,7 +1616,7 @@ function setupConfigForm() {
   });
 }
 
-async function saveConfig() {
+async function saveConfig(silent = false) {
   const cuitHomoEl = document.getElementById("cfg-cuit-homo");
   const payload = {
     env: document.getElementById("cfg-env").value,
@@ -1493,6 +1638,13 @@ async function saveConfig() {
     key_path_homo: document.getElementById("cfg-key-homo").value.trim(),
     cert_path_prod: document.getElementById("cfg-cert-prod").value.trim(),
     key_path_prod: document.getElementById("cfg-key-prod").value.trim(),
+    smtp_host: document.getElementById("cfg-smtp-host")?.value.trim() || "",
+    smtp_port: parseInt(document.getElementById("cfg-smtp-port")?.value) || null,
+    smtp_security: document.getElementById("cfg-smtp-security")?.value || "tls",
+    smtp_user: document.getElementById("cfg-smtp-user")?.value.trim() || "",
+    smtp_password: document.getElementById("cfg-smtp-password")?.value || "",
+    smtp_from_name: document.getElementById("cfg-smtp-from-name")?.value.trim() || "",
+    smtp_from_email: document.getElementById("cfg-smtp-from-email")?.value.trim() || "",
   };
 
   try {
@@ -1504,10 +1656,54 @@ async function saveConfig() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail);
 
-    showToast("Configuración guardada correctamente.", "success");
+    if (!silent) {
+      showToast("Configuración guardada correctamente.", "success");
+    }
     await loadConfig();
+    return true;
   } catch (err) {
     showToast(`Error guardando configuración: ${err.message}`, "error");
+    return false;
+  }
+}
+
+async function testSmtpConnection() {
+  const emailDestino = document.getElementById("test-smtp-email").value.trim();
+  const statusEl = document.getElementById("smtp-test-status");
+  const btn = document.getElementById("btn-test-smtp");
+
+  if (!emailDestino) {
+    showToast("Por favor escriba una dirección de correo para enviar la prueba.", "error");
+    document.getElementById("test-smtp-email").focus();
+    return;
+  }
+
+  // Guardar primero silenciosamente la configuración SMTP del formulario
+  const saved = await saveConfig(true);
+  if (!saved) return;
+
+  btn.disabled = true;
+  statusEl.innerHTML = '<span class="spinner"></span> Conectando y enviando correo de prueba...';
+  statusEl.style.color = "var(--accent-cyan)";
+
+  try {
+    const res = await fetch("/api/config/smtp-test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email_to: emailDestino }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Error al enviar correo");
+
+    statusEl.innerHTML = '✓ ' + (data.message || "Correo enviado con éxito");
+    statusEl.style.color = "var(--accent-emerald)";
+    showToast("¡Correo de prueba enviado con éxito!", "success");
+  } catch (err) {
+    statusEl.innerHTML = '✕ ' + err.message;
+    statusEl.style.color = "var(--accent-rose)";
+    showToast(`Fallo en prueba SMTP: ${err.message}`, "error");
+  } finally {
+    btn.disabled = false;
   }
 }
 
