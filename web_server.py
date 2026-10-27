@@ -25,6 +25,9 @@ from models import (
     CBTE_TIPO,
     COND_IVA_ALIAS,
     COND_IVA_NOMBRE,
+    COND_IVA_TODAS,
+    COND_IVA_EMISOR,
+    COND_IVA_RECEPTOR,
     DOC_TIPO_NOMBRE,
     IVA_ALICUOTAS,
     InvoiceItem,
@@ -429,6 +432,15 @@ def update_config(payload: ConfigIn):
         return {"status": "ok", "message": "Configuración guardada correctamente en .env"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error guardando configuración: {e}")
+
+
+@app.get("/api/config/condiciones-iva")
+def get_condiciones_iva():
+    """Retorna las listas oficiales de Condiciones frente al IVA de ARCA/AFIP para Emisor y Receptor."""
+    return {
+        "emisor": [{"id": k, "nombre": v} for k, v in COND_IVA_EMISOR.items()],
+        "receptor": [{"id": k, "nombre": v} for k, v in COND_IVA_RECEPTOR.items()],
+    }
 
 
 @app.post("/api/config/test")
@@ -1525,7 +1537,7 @@ def preview_sample_pdf(payload: Optional[PreviewSampleIn] = None):
     iva_total = sum(i.iva_monto for i in items)
     monto_total = subtotal_neto + iva_total
 
-    is_monotributo = "monotributo" in (cfg.condicion_iva_emisor or "").lower()
+    is_monotributo = any(m in (cfg.condicion_iva_emisor or "").lower() for m in ["monotribut", "exento", "no alcanzado", "eventual"])
     if payload and payload.cbte_tipo:
         preview_tipo = payload.cbte_tipo
     else:

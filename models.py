@@ -73,9 +73,11 @@ DOC_TIPO_NOMBRE = {
     99: "Doc. (Otro) / Consumidor Final",
 }
 
-# Condiciones IVA según RG 5616 / WSFEv1 / AFIP Comprobantes en Línea
+# Condiciones IVA según RG 5616 / WSFEv1 / AFIP Comprobantes en Línea (Catálogo Oficial ARCA)
 COND_IVA_NOMBRE = {
     1: "IVA Responsable Inscripto",
+    2: "IVA Responsable No Inscripto",
+    3: "IVA No Responsable",
     4: "IVA Sujeto Exento",
     5: "Consumidor Final",
     6: "Responsable Monotributo",
@@ -83,7 +85,10 @@ COND_IVA_NOMBRE = {
     8: "Proveedor del Exterior",
     9: "Cliente del Exterior",
     10: "IVA Liberado - Ley Nº 19.640",
+    11: "IVA Responsable Inscripto - Agente de Percepción",
+    12: "Pequeño Contribuyente Eventual",
     13: "Monotributista Social",
+    14: "Pequeño Contribuyente Eventual Social",
     15: "IVA No Alcanzado",
     16: "Monotributista Trabajador Independiente Promovido",
 }
@@ -100,6 +105,25 @@ COND_IVA_LEGACY = {
 # Diccionario completo para descripciones en reportes y comprobantes
 COND_IVA_TODAS = {**COND_IVA_LEGACY, **COND_IVA_NOMBRE}
 
+# Condiciones que aplican específicamente al Emisor en ARCA / AFIP
+COND_IVA_EMISOR = {
+    1: "IVA Responsable Inscripto",
+    6: "Responsable Monotributo",
+    4: "IVA Sujeto Exento",
+    13: "Monotributista Social",
+    16: "Monotributista Trabajador Independiente Promovido",
+    10: "IVA Liberado - Ley Nº 19.640",
+    11: "IVA Responsable Inscripto - Agente de Percepción",
+    15: "IVA No Alcanzado",
+    3: "IVA No Responsable",
+    12: "Pequeño Contribuyente Eventual",
+    14: "Pequeño Contribuyente Eventual Social",
+    2: "IVA Responsable No Inscripto",
+}
+
+# Condiciones que aplican al Receptor en ARCA / AFIP
+COND_IVA_RECEPTOR = COND_IVA_TODAS
+
 # Alias de nombre corto / variaciones → ID de condición IVA
 COND_IVA_ALIAS = {
     # 1: Responsable Inscripto
@@ -108,6 +132,19 @@ COND_IVA_ALIAS = {
     "IVA_RESPONSABLE_INSCRIPTO": 1,
     "INSCRIPTO": 1,
     "1": 1,
+
+    # 2: IVA Responsable No Inscripto (Legacy)
+    "RNI": 2,
+    "NO_INSCRIPTO": 2,
+    "RESPONSABLE_NO_INSCRIPTO": 2,
+    "IVA_RESPONSABLE_NO_INSCRIPTO": 2,
+    "2": 2,
+
+    # 3: IVA No Responsable
+    "NR": 3,
+    "NO_RESPONSABLE": 3,
+    "IVA_NO_RESPONSABLE": 3,
+    "3": 3,
 
     # 4: IVA Sujeto Exento
     "EX": 4,
@@ -159,11 +196,28 @@ COND_IVA_ALIAS = {
     "TIERRA_DEL_FUEGO": 10,
     "10": 10,
 
+    # 11: IVA Responsable Inscripto - Agente de Percepción
+    "AGENTE_PERCEPCION": 11,
+    "AGENTE_DE_PERCEPCION": 11,
+    "RI_AGENTE_PERCEPCION": 11,
+    "IVA_RESPONSABLE_INSCRIPTO_AGENTE_DE_PERCEPCION": 11,
+    "11": 11,
+
+    # 12: Pequeño Contribuyente Eventual
+    "EVENTUAL": 12,
+    "PEQUENO_CONTRIBUYENTE_EVENTUAL": 12,
+    "12": 12,
+
     # 13: Monotributista Social
     "MONOTRIBUTO_SOCIAL": 13,
     "MONOTRIBUTISTA_SOCIAL": 13,
     "MS": 13,
     "13": 13,
+
+    # 14: Pequeño Contribuyente Eventual Social
+    "EVENTUAL_SOCIAL": 14,
+    "PEQUENO_CONTRIBUYENTE_EVENTUAL_SOCIAL": 14,
+    "14": 14,
 
     # 15: IVA No Alcanzado
     "NO_ALCANZADO": 15,

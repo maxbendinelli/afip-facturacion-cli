@@ -1399,9 +1399,17 @@ async function loadConfig() {
     }
     document.getElementById("cfg-razon-social").value = appConfig.razon_social;
     document.getElementById("cfg-nombre-fantasia").value = appConfig.nombre_fantasia;
-    document.getElementById("cfg-domicilio").value = appConfig.domicilio;
-    document.getElementById("cfg-cond-iva-emisor").value = appConfig.condicion_iva_emisor || "Responsable Monotributo";
-    document.getElementById("cfg-ingresos-brutos").value = appConfig.ingresos_brutos;
+    const condSelect = document.getElementById("cfg-cond-iva-emisor");
+    const valCond = appConfig.condicion_iva_emisor || "Responsable Monotributo";
+    if (condSelect) {
+      if (![...condSelect.options].some(o => o.value === valCond)) {
+        const opt = document.createElement("option");
+        opt.value = valCond;
+        opt.textContent = valCond;
+        condSelect.appendChild(opt);
+      }
+      condSelect.value = valCond;
+    }
     document.getElementById("cfg-inicio-actividades").value = appConfig.inicio_actividades;
     document.getElementById("cfg-limite-cf").value = appConfig.limite_cf;
 

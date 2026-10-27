@@ -32,6 +32,7 @@ from models import (
     InvoiceResponse,
     IVA_ALICUOTAS,
     COND_IVA_TODAS,
+    COND_IVA_ALIAS,
 )
 
 PAGE_W, PAGE_H = A4
@@ -223,6 +224,11 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
 
     # Condición IVA Emisor
     cond_emisor = config.condicion_iva_emisor
+    if cond_emisor and str(cond_emisor).strip().isdigit():
+        cond_emisor = _COND_IVA.get(int(str(cond_emisor).strip()), cond_emisor)
+    elif cond_emisor and cond_emisor.strip().upper() in COND_IVA_ALIAS:
+        cond_emisor = _COND_IVA.get(COND_IVA_ALIAS[cond_emisor.strip().upper()], cond_emisor)
+
     if not cond_emisor:
         if resp.cbte_tipo in (1, 2, 3, 4, 6, 7, 8, 9):
             cond_emisor = "IVA Responsable Inscripto"

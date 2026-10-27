@@ -119,7 +119,7 @@ def _parse_condicion_iva(raw: str) -> int:
         return COND_IVA_ALIAS[key]
     raise ValueError(
         f"Condición IVA '{raw}' inválida. "
-        "Use un número (1-14) o un alias como: CF, RI, MONO, EX, RNI, NR."
+        "Use un número (1-16) o un alias como: CF, RI, MONO, EX, RNI, NR."
     )
 
 
