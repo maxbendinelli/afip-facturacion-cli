@@ -171,7 +171,10 @@ def _crear_conexion_smtp(config: Config) -> smtplib.SMTP:
             server.starttls()
 
     if config.smtp_user and config.smtp_password:
-        server.login(config.smtp_user.strip(), config.smtp_password.strip())
+        pwd = config.smtp_password.strip()
+        if "gmail" in host.lower() and len(pwd.replace(" ", "")) == 16:
+            pwd = pwd.replace(" ", "")
+        server.login(config.smtp_user.strip(), pwd)
 
     return server
 
