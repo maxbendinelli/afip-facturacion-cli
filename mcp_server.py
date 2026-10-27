@@ -193,8 +193,8 @@ def emitir_factura(
     result["condicion_iva_nombre"] = cond_iva_nombre
 
     if generar_pdf:
-        from pdf_generator import generate_pdf
-        pdf_path = f"factura_{resp.punto_venta:04d}_{resp.numero:08d}.pdf"
+        from pdf_generator import generate_pdf, format_pdf_filename
+        pdf_path = format_pdf_filename(resp.nombre_cliente, fecha=resp.fecha, hora=resp.hora)
         generate_pdf(config, resp, pdf_path, duplicado=duplicado_pdf)
         result["pdf"] = pdf_path
 
@@ -389,7 +389,8 @@ def consultar_comprobante(
             condicion_venta="Contado",
             condicion_iva_receptor=data.get("condicion_iva_receptor", 5),
         )
-        pdf_path = f"factura_{resp.punto_venta:04d}_{resp.numero:08d}.pdf"
+        from pdf_generator import format_pdf_filename
+        pdf_path = format_pdf_filename(resp.nombre_cliente, fecha=resp.fecha, hora=resp.hora)
         generate_pdf(config, resp, pdf_path)
         data["pdf"] = pdf_path
 

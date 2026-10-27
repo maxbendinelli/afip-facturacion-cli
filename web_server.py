@@ -32,7 +32,7 @@ from models import (
     InvoiceResponse,
 )
 from padron import buscar_persona
-from pdf_generator import generate_pdf
+from pdf_generator import generate_pdf, format_pdf_filename
 from validators import validar_cuit_afip, validar_formato_cuit
 from wsaa import get_token_sign
 from wsfev1 import (
@@ -685,7 +685,7 @@ def emitir_comprobante(payload: EmitirIn):
         pv = cfg.punto_venta or 4
         letra = CBTE_LETRA.get(payload.cbte_tipo, "C").lower()
         sim_num = 9999
-        pdf_name = f"comprobante_{letra}_{pv:04d}_sim_{sim_num:04d}.pdf"
+        pdf_name = format_pdf_filename(nombre_cliente, fecha=fecha, directory=COMPROBANTES_DIR)
         pdf_path = COMPROBANTES_DIR / pdf_name
         sim_op_ex = Decimal("0.00")
         sim_tot_conc = Decimal("0.00")
@@ -846,7 +846,7 @@ def emitir_comprobante(payload: EmitirIn):
         resp.domicilio_cliente = datos_padron["domicilio"]
 
     letra = CBTE_LETRA.get(resp.cbte_tipo, "C").lower()
-    pdf_filename = f"comprobante_{letra}_{resp.punto_venta:04d}_{resp.numero:08d}.pdf"
+    pdf_filename = format_pdf_filename(resp.nombre_cliente, fecha=resp.fecha, hora=resp.hora, directory=COMPROBANTES_DIR)
     pdf_path = COMPROBANTES_DIR / pdf_filename
     root_pdf_path = BASE_DIR / pdf_filename
 
@@ -1282,7 +1282,7 @@ def emitir_lote(payload: LoteEmitirIn):
             if payload.dry_run:
                 pv = cfg.punto_venta or 4
                 letra = CBTE_LETRA.get(item.cbte_tipo, "C").lower()
-                pdf_name = f"comprobante_{letra}_{pv:04d}_sim_{item.index:04d}.pdf"
+                pdf_name = format_pdf_filename(item.nombre_cliente, fecha=item.fecha or hoy, directory=COMPROBANTES_DIR)
                 pdf_path = COMPROBANTES_DIR / pdf_name
 
                 # Generar comprobante PDF simulado de prueba
@@ -1410,7 +1410,7 @@ def emitir_lote(payload: LoteEmitirIn):
 
             # Generar PDF
             letra = CBTE_LETRA.get(resp.cbte_tipo, "C").lower()
-            pdf_name = f"comprobante_{letra}_{resp.punto_venta:04d}_{resp.numero:08d}.pdf"
+            pdf_name = format_pdf_filename(resp.nombre_cliente, fecha=resp.fecha, hora=resp.hora, directory=COMPROBANTES_DIR)
             generate_pdf(cfg, resp, str(COMPROBANTES_DIR / pdf_name), duplicado=payload.duplicado, triplicado=getattr(payload, 'triplicado', False), copias=getattr(payload, 'copias', 1))
 
             resp_dict = resp.to_json()
@@ -1650,7 +1650,21 @@ def reimprimir_comprobante(payload: ReimprimirIn, env: Optional[str] = Query(Non
         )
 
         letra = CBTE_LETRA.get(resp.cbte_tipo, "C").lower()
-        pdf_filename = f"comprobante_{letra}_{resp.punto_venta:04d}_{resp.numero:08d}.pdf"
+        json_path = COMPROBANTES_DIR / f"comprobante_{letra}_{resp.punto_venta:04d}_{resp.numero:08d}.json"
+        existing_pdf = None
+        if json_path.exists():
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                    existing_pdf = d.get("pdf_filename")
+            except Exception:
+                pass
+
+        if existing_pdf:
+            pdf_filename = existing_pdf
+        else:
+            pdf_filename = format_pdf_filename(nombre_cliente, fecha=resp.fecha, hora=resp.hora, directory=COMPROBANTES_DIR)
+
         pdf_path = COMPROBANTES_DIR / pdf_filename
 
         generate_pdf(cfg, resp, str(pdf_path), duplicado=payload.duplicado, triplicado=getattr(payload, 'triplicado', False), copias=getattr(payload, 'copias', 1))
@@ -1682,6 +1696,30 @@ def serve_pdf(filename: str):
                 path=str(p),
                 media_type="application/pdf",
                 headers={"Content-Disposition": f"inline; filename={clean_name}"},
+            )
+
+    raise HTTPException(status_code=404, detail="Archivo PDF no encontrado.")
+
+
+@app.get("/api/comprobantes/download-pdf/{filename}")
+def download_comprobante_pdf(filename: str):
+    """Descarga el comprobante PDF como attachment."""
+    clean_name = os.path.basename(filename)
+    if not clean_name.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Formato de archivo inválido.")
+
+    possible_paths = [
+        COMPROBANTES_DIR / clean_name,
+        BASE_DIR / clean_name,
+    ]
+
+    for p in possible_paths:
+        if p.exists():
+            return FileResponse(
+                path=str(p),
+                media_type="application/pdf",
+                filename=clean_name,
+                headers={"Content-Disposition": f'attachment; filename="{clean_name}"'},
             )
 
     raise HTTPException(status_code=404, detail="Archivo PDF no encontrado.")

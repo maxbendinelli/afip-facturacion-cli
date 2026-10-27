@@ -5,10 +5,14 @@ personalización: Logo, Leyenda / Datos bancarios y Marca de agua (Watermark).
 """
 import base64
 from collections import defaultdict
+from datetime import datetime
 import io
 import json
 import os
+from pathlib import Path
+import re
 import tempfile
+from typing import Optional
 from decimal import Decimal
 
 import qrcode
@@ -38,6 +42,72 @@ _GREY = colors.Color(0.90, 0.90, 0.90)
 
 _COND_IVA = COND_IVA_TODAS
 
+
+def is_consumidor_final(nombre: Optional[str]) -> bool:
+    """Determina si el cliente es Consumidor Final o sin identificar."""
+    if not nombre:
+        return True
+    clean = re.sub(r"[^a-zA-Z0-9]+", "", str(nombre)).lower()
+    return clean in {
+        "",
+        "consumidorfinal",
+        "consumidorfinalejemplo",
+        "cf",
+        "sinidentificar",
+        "sincuit",
+        "sinnombre",
+        "clienteocasional",
+    }
+
+
+def sanitize_nombre_archivo(nombre: Optional[str]) -> str:
+    """Limpia el nombre y apellido del cliente para generar un nombre de archivo seguro."""
+    if not nombre:
+        return ""
+    s = str(nombre).strip()
+    s = re.sub(r"[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑüÜ]+", "-", s)
+    s = re.sub(r"-+", "-", s)
+    return s.strip("-")
+
+
+def format_pdf_filename(
+    nombre_cliente: Optional[str] = None,
+    fecha: Optional[str] = None,
+    hora: Optional[str] = None,
+    directory: Optional[Path] = None,
+) -> str:
+    """
+    Genera el nombre de archivo PDF según el formato:
+      YYYYMMDDHHMMSS-Nombre-Apellido.pdf
+    Si es consumidor final o sin identificar:
+      YYYYMMDDHHMMSS.pdf
+    """
+    now = datetime.now()
+    f_str = str(fecha).strip() if fecha else ""
+    h_str = str(hora).strip() if hora else ""
+
+    date_part = f_str if (len(f_str) == 8 and f_str.isdigit()) else now.strftime("%Y%m%d")
+    time_part = h_str if (len(h_str) == 6 and h_str.isdigit()) else now.strftime("%H%M%S")
+    ts = f"{date_part}{time_part}"
+
+    if is_consumidor_final(nombre_cliente):
+        base_name = ts
+    else:
+        safe_name = sanitize_nombre_archivo(nombre_cliente)
+        base_name = f"{ts}-{safe_name}" if safe_name else ts
+
+    filename = f"{base_name}.pdf"
+
+    if directory:
+        d = Path(directory)
+        candidate = filename
+        counter = 1
+        while (d / candidate).exists():
+            candidate = f"{base_name}_{counter}.pdf"
+            counter += 1
+        filename = candidate
+
+    return filename
 
 
 def _fmt_cuit(cuit: str) -> str:

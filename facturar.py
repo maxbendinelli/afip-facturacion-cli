@@ -289,7 +289,8 @@ def cmd_emitir(args) -> None:
         letra = getattr(args, "tipo", "C").upper()
         pdf_path = None
         if args.pdf:
-            pdf_path = f"comprobante_{letra.lower()}_{config.punto_venta:04d}_simulado.pdf"
+            from pdf_generator import format_pdf_filename
+            pdf_path = getattr(args, "output", None) or format_pdf_filename(nombre_cliente, fecha=fecha)
             resp_sim = InvoiceResponse(
                 cae="SIMULADO_CAE_123456",
                 cae_vencimiento=(date.today() + timedelta(days=10)).strftime("%Y%m%d"),
@@ -393,8 +394,8 @@ def cmd_emitir(args) -> None:
     result["condicion_iva_nombre"] = condicion_iva_nombre
 
     if getattr(args, "pdf", False):
-        from pdf_generator import generate_pdf
-        pdf_path = f"factura_{resp.punto_venta:04d}_{resp.numero:08d}.pdf"
+        from pdf_generator import generate_pdf, format_pdf_filename
+        pdf_path = getattr(args, "output", None) or format_pdf_filename(resp.nombre_cliente, fecha=resp.fecha, hora=resp.hora)
         generate_pdf(config, resp, pdf_path, duplicado=args.duplicado, triplicado=getattr(args, "triplicado", False))
         result["pdf"] = pdf_path
 
@@ -626,7 +627,8 @@ def cmd_consultar(args) -> None:
         hora=data.get("hora"),
     )
 
-    pdf_path = args.output or f"factura_{resp.punto_venta:04d}_{resp.numero:08d}.pdf"
+    from pdf_generator import format_pdf_filename
+    pdf_path = args.output or format_pdf_filename(resp.nombre_cliente, fecha=resp.fecha, hora=resp.hora)
     generate_pdf(config, resp, pdf_path, duplicado=args.duplicado, triplicado=getattr(args, "triplicado", False))
     data["pdf"] = pdf_path
     _output({"status": "ok", **data})
@@ -692,7 +694,8 @@ def cmd_reimprimir(args) -> None:
         items=items,
     )
 
-    pdf_path = args.output or f"factura_{resp.punto_venta:04d}_{resp.numero:08d}.pdf"
+    from pdf_generator import format_pdf_filename
+    pdf_path = args.output or format_pdf_filename(resp.nombre_cliente, fecha=resp.fecha, hora=resp.hora)
     generate_pdf(config, resp, pdf_path, duplicado=args.duplicado, triplicado=getattr(args, "triplicado", False))
     _output({"status": "ok", "pdf": pdf_path})
 
@@ -749,7 +752,8 @@ def cmd_generar_pdf(args) -> None:
         items=items,
     )
 
-    pdf_path = args.output or f"factura_{resp.punto_venta:04d}_{resp.numero:08d}.pdf"
+    from pdf_generator import format_pdf_filename
+    pdf_path = args.output or format_pdf_filename(resp.nombre_cliente, fecha=resp.fecha, hora=resp.hora)
     generate_pdf(config, resp, pdf_path, duplicado=args.duplicado, triplicado=getattr(args, "triplicado", False))
     _output({"status": "ok", "pdf": pdf_path})
 
@@ -1021,7 +1025,8 @@ def cmd_lote(args) -> None:
             if config.dry_run:
                 pv = config.punto_venta or 4
                 letra = "A" if item["cbte_tipo"] == 1 else ("B" if item["cbte_tipo"] == 6 else "C")
-                pdf_name = f"comprobante_{letra.lower()}_{pv:04d}_sim_{item['index']:04d}.pdf"
+                from pdf_generator import format_pdf_filename
+                pdf_name = format_pdf_filename(item["nombre_cliente"], fecha=item.get("fecha") or hoy_dt.strftime("%Y%m%d"), directory=comprobantes_dir)
                 pdf_path = comprobantes_dir / pdf_name
 
                 serv_desde = item.get("periodo_desde") or (hoy_dt.strftime("%Y%m") + "01")
@@ -1122,7 +1127,8 @@ def cmd_lote(args) -> None:
             resp.fecha_vto_pago = vto_pago
 
             letra = "A" if cbte_tipo == 1 else ("B" if cbte_tipo == 6 else "C")
-            pdf_name = f"comprobante_{letra.lower()}_{resp.punto_venta:04d}_{resp.numero:08d}.pdf"
+            from pdf_generator import format_pdf_filename
+            pdf_name = format_pdf_filename(resp.nombre_cliente, fecha=resp.fecha, hora=resp.hora, directory=comprobantes_dir)
             pdf_path = comprobantes_dir / pdf_name
             if args.pdf:
                 generate_pdf(config, resp, str(pdf_path), duplicado=args.duplicado, triplicado=getattr(args, "triplicado", False))
