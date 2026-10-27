@@ -1586,6 +1586,7 @@ def emitir_lote(payload: LoteEmitirIn):
                 resp_dict["email_enviado"] = mail_ok
                 if not mail_ok:
                     resp_dict["email_error"] = mail_res.get("error")
+                time.sleep(1.0)  # Pausa de protección antispam y rate-limit para servidores SMTP (Gmail, etc.)
 
             with open(COMPROBANTES_DIR / f"comprobante_{letra}_{resp.punto_venta:04d}_{resp.numero:08d}.json", "w") as f:
                 json.dump(resp_dict, f, ensure_ascii=False)
