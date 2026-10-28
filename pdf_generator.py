@@ -153,27 +153,12 @@ def format_pdf_filename(
             safe_name = sanitize_nombre_archivo(nombre_cliente)
             base_name = f"{ts}-{safe_name}" if safe_name else ts
 
-    filename = f"{base_name}.pdf"
-
-    if directory:
-        d = Path(directory)
-        candidate = filename
-        counter = 1
-        while (d / candidate).exists():
-            candidate = f"{base_name}_{counter}.pdf"
-            counter += 1
-        filename = candidate
-
-    return filename
+    return f"{base_name}.pdf"
 
 
 def pdf_filename_for(config: Config, resp: InvoiceResponse, directory: Optional[Path] = None,
-                     reuse_existing: bool = False) -> str:
-    """Nombre de archivo estándar para un comprobante ya emitido (o simulado).
-
-    Con reuse_existing=True, si el archivo ya existe se devuelve el mismo nombre (se sobreescribe)
-    en lugar de agregar un sufijo numérico.
-    """
+                     reuse_existing: bool = True) -> str:
+    """Nombre de archivo estándar para un comprobante ya emitido (o simulado)."""
     kwargs = dict(
         cbte_tipo=resp.cbte_tipo,
         cuit_emisor=config.cuit,
@@ -181,10 +166,7 @@ def pdf_filename_for(config: Config, resp: InvoiceResponse, directory: Optional[
         numero=resp.numero,
         periodo_desde=resp.periodo_desde,
     )
-    if reuse_existing:
-        return format_pdf_filename(resp.nombre_cliente, fecha=resp.fecha, hora=resp.hora, **kwargs)
-    return format_pdf_filename(resp.nombre_cliente, fecha=resp.fecha, hora=resp.hora,
-                               directory=directory, **kwargs)
+    return format_pdf_filename(resp.nombre_cliente, fecha=resp.fecha, hora=resp.hora, directory=directory, **kwargs)
 
 
 def _wrap_text(c: canvas.Canvas, text: str, font: str, size: float,
