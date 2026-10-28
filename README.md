@@ -23,13 +23,21 @@ Incluye **CLI**, **Dashboard Web interactivo**, **Servidor MCP multiplataforma**
 - 🪪 **Catálogo Oficial Completo de Documentos (AFIP):** Soporte exhaustivo para CUIT (80), CUIL (86), CDI (87), Libreta de Enrolamiento (89), Libreta Cívica (90), CI Extranjera (91), DNI (96), Pasaporte (94), CI Policía Federal (0), Certificado de Migración (95) y Sin Documento (99).
 - 📡 **Monitor AFIP Online en Tiempo Real:** Visualización en vivo del último comprobante registrado en los servidores de AFIP y del próximo número a emitir para cada Punto de Venta y tipo de comprobante.
 - 🏛️ **Padrón A13 con Nombres Reales:** Autocompletado instantáneo de Razón Social y Domicilio fiscal consultando en producción para obtener siempre las denominaciones reales, aun en entorno de testing.
-- 🎨 **Personalización y Diseño de Facturas PDF:**
-  - Carga de **Logotipo comercial** de la empresa en la cabecera.
+- 🎨 **Personalización y Diseño Oficial de Facturas PDF:**
+  - Carga de **Logotipo comercial** de la empresa con **alto configurable en milímetros** (`AFIP_LOGO_HEIGHT_MM`, de 6 a 60 mm) y autoexpansión de la cabecera.
+  - **Ajuste y Salto de Renglón Automático:** distribución en múltiples renglones por palabras de razones sociales extensas y domicilios largos sin desbordar el comprobante.
+  - **Régimen de Transparencia Fiscal al Consumidor (Ley 27.743 - RG 5614/2024):** cálculo y discriminación automática de **IVA Contenido** en Facturas B.
+  - **Visualización permanente de Ingresos Brutos** (número de inscripción o `EXENTO`).
   - Recuadro para **Leyenda / Datos Bancarios** (CBU, Alias, Banco, observaciones comerciales).
-  - **Marcas de agua** sutiles configurables (texto como "ORIGINAL", "DUPLICADO", "PAGADO" o imagen personalizada).
+  - **Marcas de agua** configurables (texto como "ORIGINAL", "DUPLICADO", "PAGADO" o imagen transparente).
   - Botón de previsualización en vivo de factura de muestra con el diseño configurado.
+- 🏷️ **Nomenclatura Estandarizada de Archivos PDF:**
+  - Rotulado uniforme y ordenado cronológicamente: `AAAA-MM-DD Fact. AAAA-MM <Cliente> <J>.<Z>. <CUIT_EMISOR>_<COD_3D>_<PV_5D>_<NRO_8D>.pdf` (donde `J` es el tipo F/NC/ND, `Z` la letra A/B/C, `COD_3D` el código AFIP y `NRO_8D` el número oficial).
+- 📧 **Envío de Facturas por Correo Electrónico (SMTP):**
+  - Envío automático de facturas con PDF adjunto para comprobantes individuales o masivos en lote.
+  - Soporte para TLS/STARTTLS y SSL directo (Gmail, Outlook, servidores corporativos) con protección anti-rate-limit.
 - 🔐 **Selector y Gestor de Certificados:** Explorador visual de archivos `.crt` y `.key`, detección automática en carpetas y subida directa desde el navegador.
-- 🏛️ **Padrón A13 de AFIP:** Autocompletado instantáneo de Razón Social y Domicilio fiscal al ingresar el CUIT del cliente.
+- 🏛️ **Padrón A13 de AFIP:** Autocompletado instantáneo de Razón Social y Domicilio fiscal al ingresar el CUIT o DNI del cliente.
 - ⚖️ **11 Condiciones Oficiales frente al IVA:** Soporte exhaustivo para todas las condiciones vigentes de AFIP bajo la **RG 5616** con compatibilidad histórica.
 - 🤖 **Servidor MCP (Model Context Protocol):** Compatible con Claude Desktop / Code, Cursor, Antigravity, VS Code, n8n, LangChain y bots autónomos (transportes STDIO y SSE/HTTP).
 - 🧪 **Modos Homologación y Producción:** Pruebas seguras sin consecuencias fiscales o emisión legal en vivo.
@@ -125,8 +133,45 @@ AFIP_KEY_PATH_HOMO=./certs/homo/afip_20123456789.key
 
 # Personalización estética de Facturas PDF (Opcional)
 AFIP_LOGO_PATH=./static/uploads/logo.png
+AFIP_LOGO_HEIGHT_MM=16
 AFIP_LEYENDA=Pago por transferencia - CBU: 0110599520000012345678 Alias: MIEMPRESA.PAGOS
 AFIP_WATERMARK_TEXT=
+AFIP_WATERMARK_IMAGE=
+
+# Configuración de Envío por Email (SMTP - Opcional)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURITY=tls
+SMTP_USER=tu-cuenta@gmail.com
+SMTP_PASSWORD=tu-contraseña-de-aplicacion
+SMTP_FROM_NAME="Tu Empresa o Nombre"
+SMTP_FROM_EMAIL=tu-cuenta@gmail.com
+```
+
+---
+
+## 🏷️ Nomenclatura y Rotulado de Comprobantes
+
+Todos los archivos PDF generados (en emisión manual, simulación, lotes CSV o reimpresión) siguen un formato de rotulado estricto y ordenado cronológicamente:
+
+```text
+AAAA-MM-DD Fact. AAAA-MM <Cliente> <J>.<Z>. <CUIT_EMISOR>_<00X>_<PV_5D>_<NRO_8D>.pdf
+```
+
+| Elemento | Significado | Ejemplo |
+|---|---|---|
+| `AAAA-MM-DD` | Fecha de emisión del comprobante | `2026-10-28` |
+| `Fact. AAAA-MM` | Mes del período facturado (o mes de emisión si no aplica período) | `Fact. 2026-10` |
+| `<Cliente>` | Nombre o Razón Social del destinatario (o `Consumidor Final`) | `M. Bendinelli` |
+| `<J>.<Z>.` | Tipo abreviado (`J` = `F`, `NC`, `ND`, `R` / `Z` = letra `A`, `B`, `C`) | `F.B.` / `F.A.` / `NC.B.` |
+| `<CUIT_EMISOR>` | CUIT del emisor (11 dígitos continuos) | `23255684779` |
+| `<00X>` | Código numérico oficial de comprobante AFIP (3 dígitos) | `006` (Fact. B), `001` (Fact. A), `008` (NC B), `011` (Fact. C) |
+| `<PV_5D>` | Punto de venta con relleno a 5 dígitos | `00004` |
+| `<NRO_8D>` | Número oficial de comprobante con relleno a 8 dígitos | `00000014` |
+
+**Ejemplo completo:**
+```text
+2026-10-28 Fact. 2026-10 M. Bendinelli F.B. 23255684779_006_00004_00000014.pdf
 ```
 
 ---
