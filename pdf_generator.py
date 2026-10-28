@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+import unicodedata
 from typing import Optional
 from decimal import Decimal
 
@@ -71,31 +72,86 @@ def sanitize_nombre_archivo(nombre: Optional[str]) -> str:
     return s.strip("-")
 
 
+_TIPO_CBTE_ABREV = {
+    1: "F", 6: "F", 11: "F",
+    2: "ND", 7: "ND", 12: "ND",
+    3: "NC", 8: "NC", 13: "NC",
+    4: "R", 9: "R", 15: "R",
+}
+
+
+def _nombre_para_archivo(nombre: Optional[str], max_len: int = 60) -> str:
+    """Nombre del cliente apto para nombre de archivo (ASCII, sin caracteres reservados)."""
+    if not nombre:
+        return ""
+    s = unicodedata.normalize("NFKD", str(nombre))
+    s = s.encode("ascii", "ignore").decode("ascii")
+    s = re.sub(r'[\\/:*?"<>|%#\r\n\t]+', " ", s)
+    s = re.sub(r"\s+", " ", s).strip(" .")
+    if len(s) > max_len:
+        s = s[:max_len].rstrip(" .")
+    return s
+
+
 def format_pdf_filename(
     nombre_cliente: Optional[str] = None,
     fecha: Optional[str] = None,
     hora: Optional[str] = None,
     directory: Optional[Path] = None,
+    *,
+    cbte_tipo: Optional[int] = None,
+    cuit_emisor: Optional[str] = None,
+    punto_venta: Optional[int] = None,
+    numero: Optional[int] = None,
+    periodo_desde: Optional[str] = None,
 ) -> str:
     """
-    Genera el nombre de archivo PDF según el formato:
-      YYYYMMDDHHMMSS-Nombre-Apellido.pdf
-    Si es consumidor final o sin identificar:
-      YYYYMMDDHHMMSS.pdf
+    Genera el nombre de archivo PDF.
+
+    Con los datos del comprobante (cbte_tipo, cuit_emisor, punto_venta y numero):
+      AAAA-MM-DD Fact. AAAA-MM <Cliente> <J>.<Z>. <CUIT emisor>_<cod 3d>_<PV 5d>_<Nro 8d>.pdf
+      ej: 2026-10-28 Fact. 2026-10 M. Bendinelli F.B. 23255684779_006_00003_00000123.pdf
+      J = F / NC / ND (tipo de comprobante), Z = letra (A, B o C).
+      Si es consumidor final / sin identificar se omite el nombre del cliente.
+
+    Sin esos datos (compatibilidad):
+      YYYYMMDDHHMMSS-Nombre-Apellido.pdf  (o YYYYMMDDHHMMSS.pdf)
     """
     now = datetime.now()
     f_str = str(fecha).strip() if fecha else ""
     h_str = str(hora).strip() if hora else ""
 
     date_part = f_str if (len(f_str) == 8 and f_str.isdigit()) else now.strftime("%Y%m%d")
-    time_part = h_str if (len(h_str) == 6 and h_str.isdigit()) else now.strftime("%H%M%S")
-    ts = f"{date_part}{time_part}"
 
-    if is_consumidor_final(nombre_cliente):
-        base_name = ts
+    if cbte_tipo is not None and cuit_emisor and punto_venta is not None and numero is not None:
+        p_str = str(periodo_desde).strip() if periodo_desde else ""
+        period_part = p_str[:6] if (len(p_str) >= 6 and p_str[:6].isdigit()) else date_part[:6]
+        tipo_j = _TIPO_CBTE_ABREV.get(int(cbte_tipo), "F")
+        letra_z = CBTE_LETRA.get(int(cbte_tipo), "C")
+        cuit_s = re.sub(r"\D", "", str(cuit_emisor))
+
+        partes = [
+            f"{date_part[:4]}-{date_part[4:6]}-{date_part[6:8]}",
+            "Fact.",
+            f"{period_part[:4]}-{period_part[4:6]}",
+        ]
+        if not is_consumidor_final(nombre_cliente):
+            nom = _nombre_para_archivo(nombre_cliente)
+        else:
+            nom = "Consumidor Final"
+        if nom:
+            partes.append(nom)
+        partes.append(f"{tipo_j}.{letra_z}.")
+        partes.append(f"{cuit_s}_{int(cbte_tipo):03d}_{int(punto_venta):05d}_{int(numero):08d}")
+        base_name = " ".join(partes)
     else:
-        safe_name = sanitize_nombre_archivo(nombre_cliente)
-        base_name = f"{ts}-{safe_name}" if safe_name else ts
+        time_part = h_str if (len(h_str) == 6 and h_str.isdigit()) else now.strftime("%H%M%S")
+        ts = f"{date_part}{time_part}"
+        if is_consumidor_final(nombre_cliente):
+            base_name = ts
+        else:
+            safe_name = sanitize_nombre_archivo(nombre_cliente)
+            base_name = f"{ts}-{safe_name}" if safe_name else ts
 
     filename = f"{base_name}.pdf"
 
@@ -109,6 +165,57 @@ def format_pdf_filename(
         filename = candidate
 
     return filename
+
+
+def pdf_filename_for(config: Config, resp: InvoiceResponse, directory: Optional[Path] = None,
+                     reuse_existing: bool = False) -> str:
+    """Nombre de archivo estándar para un comprobante ya emitido (o simulado).
+
+    Con reuse_existing=True, si el archivo ya existe se devuelve el mismo nombre (se sobreescribe)
+    en lugar de agregar un sufijo numérico.
+    """
+    kwargs = dict(
+        cbte_tipo=resp.cbte_tipo,
+        cuit_emisor=config.cuit,
+        punto_venta=resp.punto_venta,
+        numero=resp.numero,
+        periodo_desde=resp.periodo_desde,
+    )
+    if reuse_existing:
+        return format_pdf_filename(resp.nombre_cliente, fecha=resp.fecha, hora=resp.hora, **kwargs)
+    return format_pdf_filename(resp.nombre_cliente, fecha=resp.fecha, hora=resp.hora,
+                               directory=directory, **kwargs)
+
+
+def _wrap_text(c: canvas.Canvas, text: str, font: str, size: float,
+               first_w: float, rest_w: float) -> list:
+    """Corte de línea por palabras; la 1.ª línea tiene first_w y el resto rest_w."""
+    first_w = max(first_w, 20.0)
+    rest_w = max(rest_w, 20.0)
+    words = str(text or "").replace("\n", " ").split()
+    lines: list = []
+    cur = ""
+    width = first_w
+    for w in words:
+        trial = f"{cur} {w}" if cur else w
+        if c.stringWidth(trial, font, size) <= width:
+            cur = trial
+            continue
+        if cur:
+            lines.append(cur)
+            cur = ""
+            width = rest_w
+        while len(w) > 1 and c.stringWidth(w, font, size) > width:
+            n = len(w)
+            while n > 1 and c.stringWidth(w[:n], font, size) > width:
+                n -= 1
+            lines.append(w[:n])
+            w = w[n:]
+            width = rest_w
+        cur = w
+    if cur or not lines:
+        lines.append(cur)
+    return lines
 
 
 def _fmt_cuit(cuit: str) -> str:
@@ -173,6 +280,49 @@ def _qr_png_path(url: str) -> str:
     tmp.write(buf.read())
     tmp.close()
     return tmp.name
+
+
+def _iva_contenido(resp: InvoiceResponse) -> Decimal:
+    """IVA total del comprobante. Prueba, en orden: ImpIVA, alícuotas informadas,
+    desglose de ítems y diferencia total - neto - otros importes."""
+    zero = Decimal("0.00")
+
+    def _dec(v) -> Decimal:
+        try:
+            return Decimal(str(v))
+        except Exception:
+            return zero
+
+    imp_iva = _dec(getattr(resp, "imp_iva", None) or 0)
+    if imp_iva > zero:
+        return imp_iva
+
+    if getattr(resp, "ivas", None):
+        total = sum((_dec(iv.get("Importe", 0)) for iv in resp.ivas), zero)
+        if total > zero:
+            return total
+
+    total_items = zero
+    for it in getattr(resp, "items", None) or []:
+        alic_id = getattr(it, "alicuota_iva_id", 5)
+        alic = _dec(getattr(it, "alicuota_iva", 0))
+        if getattr(it, "tipo_iva", "iva") != "iva" or alic_id in (1, 2, 3) or alic <= zero:
+            continue
+        if resp.cbte_tipo in (1, 2, 3, 4):
+            total_items += _dec(it.iva_monto)           # precio neto: IVA se suma
+        else:
+            bruto = _dec(it.subtotal)                   # precio final: IVA contenido
+            neto = (bruto / (Decimal("1") + alic / Decimal("100"))).quantize(Decimal("0.01"))
+            total_items += bruto - neto
+    if total_items > zero:
+        return total_items
+
+    if getattr(resp, "imp_neto", None) is not None:
+        calc = (_dec(resp.monto) - _dec(resp.imp_neto) - _dec(getattr(resp, "imp_trib", None) or 0)
+                - _dec(getattr(resp, "imp_op_ex", None) or 0) - _dec(getattr(resp, "imp_tot_conc", None) or 0))
+        if calc > zero:
+            return calc
+    return zero
 
 
 def _lv(c: canvas.Canvas, x: float, y: float, label: str, value: str, size: float = 8.5) -> float:
@@ -243,7 +393,15 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
     y -= label_h
 
     # ── HEADER BOX ───────────────────────────────────────────────────────────
-    BOX_H = 44 * mm
+    # Logo (tamaño configurable): se resuelve antes para dimensionar la caja
+    logo_file = _resolve_image_path(config.logo_path)
+    has_logo = bool(logo_file and os.path.isfile(logo_file))
+    try:
+        _lh = float(getattr(config, "logo_height_mm", 16.0) or 16.0)
+    except (TypeError, ValueError):
+        _lh = 16.0
+    logo_h = max(6.0, min(_lh, 60.0)) * mm
+    BOX_H = max(44 * mm, logo_h + 28 * mm) if has_logo else 44 * mm
     LEFT_W = CONTENT_W * 0.46
     MID_W = CONTENT_W * 0.09
     RIGHT_W = CONTENT_W - LEFT_W - MID_W
@@ -258,18 +416,23 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
 
     # Columna izquierda: Logo y/o Razón Social
     pad_l = left_x + 3 * mm
-    logo_file = _resolve_image_path(config.logo_path)
-    has_logo = bool(logo_file and os.path.isfile(logo_file))
 
     if has_logo:
         drawn = False
-        logo_max_w = LEFT_W - 8 * mm
-        logo_max_h = 16 * mm
+        logo_avail_w = LEFT_W - 8 * mm
+        try:
+            _lw = float(getattr(config, "logo_width_mm", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            _lw = 0.0
+        logo_max_w = min(_lw * mm, logo_avail_w) if _lw > 0 else logo_avail_w
+        logo_max_h = logo_h
+        logo_x = left_x + (LEFT_W - logo_max_w) / 2
+        logo_y = y - 2 * mm - logo_max_h
         try:
             c.drawImage(
                 logo_file,
-                left_x + 4 * mm,
-                y - 18 * mm,
+                logo_x,
+                logo_y,
                 width=logo_max_w,
                 height=logo_max_h,
                 preserveAspectRatio=True,
@@ -281,8 +444,8 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
             try:
                 c.drawImage(
                     logo_file,
-                    left_x + 4 * mm,
-                    y - 18 * mm,
+                    logo_x,
+                    logo_y,
                     width=logo_max_w,
                     height=logo_max_h,
                     preserveAspectRatio=True,
@@ -293,8 +456,11 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
                 drawn = False
 
         if drawn:
-            c.setFont("Helvetica-Bold", 8.5)
-            c.drawCentredString(left_x + LEFT_W / 2, y - 22 * mm, razon)
+            _rs_fs = 8.5
+            while _rs_fs > 6 and c.stringWidth(razon, "Helvetica-Bold", _rs_fs) > LEFT_W - 6 * mm:
+                _rs_fs -= 0.5
+            c.setFont("Helvetica-Bold", _rs_fs)
+            c.drawCentredString(left_x + LEFT_W / 2, logo_y - 4 * mm, razon)
         else:
             c.setFont("Helvetica-Bold", 11)
             c.drawCentredString(left_x + LEFT_W / 2, y - 8 * mm, razon)
@@ -340,9 +506,11 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
     _lv(c, pad_r, rline, "Fecha de Emisión:  ", fecha_txt, 8)
     rline -= 5 * mm
     _lv(c, pad_r, rline, "CUIT:  ", _fmt_cuit(config.cuit), 8)
-    if config.ingresos_brutos:
-        rline -= 5 * mm
-        _lv(c, pad_r, rline, "Ingresos Brutos:  ", config.ingresos_brutos, 8)
+    ib_text = (config.ingresos_brutos or "").strip()
+    if not ib_text:
+        ib_text = "EXENTO" if "monotribut" in (cond_emisor or "").lower() else _fmt_cuit(config.cuit)
+    rline -= 5 * mm
+    _lv(c, pad_r, rline, "Ingresos Brutos:  ", ib_text, 8)
     if config.inicio_actividades:
         rline -= 5 * mm
         _lv(c, pad_r, rline, "Fecha de Inicio de Actividades:  ", config.inicio_actividades, 8)
@@ -369,54 +537,68 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
         y -= PH
 
     # ── BLOQUE COMPRADOR ─────────────────────────────────────────────────────
-    BUYER_H = 22 * mm
     BLEFT_W = CONTENT_W * 0.45
     mid_b = MARGIN + BLEFT_W
-    c.rect(MARGIN, y - BUYER_H, CONTENT_W, BUYER_H)
-    c.line(mid_b, y - BUYER_H, mid_b, y)
-
-    bl = MARGIN + 3 * mm
-    br = mid_b + 3 * mm
-    by = y - 5.5 * mm
     fs = 8.5
-    doc_lbl = DOC_TIPO_NOMBRE.get(resp.doc_tipo, "")
-    if doc_lbl and resp.cuit_cliente and resp.cuit_cliente != "0":
-        _lv(c, bl, by, f"{doc_lbl}:  ", resp.cuit_cliente, fs)
-    by -= 5.5 * mm
-    _lv(c, bl, by, "Condición frente al IVA:  ",
-        _COND_IVA.get(resp.condicion_iva_receptor, "Consumidor Final"), fs)
-    by -= 5.5 * mm
-    _lv(c, bl, by, "Condición de venta:  ", resp.condicion_venta, fs)
+    lead = fs * 1.25          # interlineado dentro de un mismo dato
+    row_gap = 5.0             # separación entre datos (pt)
+    left_col_w = BLEFT_W - 6 * mm
+    right_col_w = CONTENT_W - BLEFT_W - 6 * mm
 
-    # Nombre del receptor
-    by2 = y - 5.5 * mm
+    def _layout_rows(rows, col_w):
+        """rows: [(label, valor)] -> [(label, [líneas])] con corte de línea por palabras."""
+        out = []
+        for lbl, val in rows:
+            lw = c.stringWidth(lbl, "Helvetica-Bold", fs)
+            out.append((lbl, lw, _wrap_text(c, val, "Helvetica", fs, col_w - lw, col_w)))
+        return out
+
+    def _rows_height(layout):
+        n_lines = sum(len(ls) for _, _, ls in layout)
+        return (n_lines - 1) * lead + (len(layout) - 1) * row_gap if layout else 0
+
+    def _draw_rows(layout, x, y_first):
+        yy = y_first
+        for lbl, lw, ls in layout:
+            c.setFont("Helvetica-Bold", fs)
+            c.drawString(x, yy, lbl)
+            c.setFont("Helvetica", fs)
+            c.drawString(x + lw, yy, ls[0])
+            for extra in ls[1:]:
+                yy -= lead
+                c.drawString(x, yy, extra)
+            yy -= lead + row_gap
+
+    doc_lbl = DOC_TIPO_NOMBRE.get(resp.doc_tipo, "")
+    left_rows = []
+    if doc_lbl and resp.cuit_cliente and resp.cuit_cliente != "0":
+        left_rows.append((f"{doc_lbl}:  ", str(resp.cuit_cliente)))
+    else:
+        left_rows.append(("", ""))   # mantiene el lugar, como en el modelo oficial
+    left_rows.append(("Condición frente al IVA:  ",
+                      _COND_IVA.get(resp.condicion_iva_receptor, "Consumidor Final")))
+    left_rows.append(("Condición de venta:  ", resp.condicion_venta or ""))
+
     if is_consumidor_final(resp.nombre_cliente):
         nombre_receptor = ""
     else:
         nombre_receptor = resp.nombre_cliente or ""
-    right_col_w = CONTENT_W - BLEFT_W - 6 * mm
-    lbl_rs = "Apellido y Nombre / Razón Social:  "
-    lbl_w = c.stringWidth(lbl_rs, "Helvetica-Bold", fs)
-    max_nombre_w = right_col_w - lbl_w
-    nombre_fs = fs
-    while nombre_fs > 6 and c.stringWidth(nombre_receptor, "Helvetica", nombre_fs) > max_nombre_w:
-        nombre_fs -= 0.5
-    _lv(c, br, by2, lbl_rs, nombre_receptor, nombre_fs)
-    by2 -= 5.5 * mm
+    right_rows = [
+        ("Apellido y Nombre / Razón Social:  ", nombre_receptor),
+        ("Domicilio:  ", resp.domicilio_cliente or ""),
+    ]
 
-    # Domicilio
-    domicilio_txt = resp.domicilio_cliente or ""
-    dom_fs = fs
-    lbl_dom = "Domicilio:  "
-    lbl_dom_w = c.stringWidth(lbl_dom, "Helvetica-Bold", dom_fs)
-    max_dom_w = right_col_w - lbl_dom_w
-    while dom_fs > 6 and c.stringWidth(domicilio_txt, "Helvetica", dom_fs) > max_dom_w:
-        dom_fs -= 0.5
-    if domicilio_txt and c.stringWidth(domicilio_txt, "Helvetica", dom_fs) > max_dom_w:
-        while len(domicilio_txt) > 5 and c.stringWidth(domicilio_txt + "...", "Helvetica", dom_fs) > max_dom_w:
-            domicilio_txt = domicilio_txt[:-1]
-        domicilio_txt += "..."
-    _lv(c, br, by2, lbl_dom, domicilio_txt, dom_fs)
+    left_layout = _layout_rows(left_rows, left_col_w)
+    right_layout = _layout_rows(right_rows, right_col_w)
+    first_off = 5.5 * mm
+    content_h = first_off + max(_rows_height(left_layout), _rows_height(right_layout)) + 3 * mm
+    BUYER_H = max(22 * mm, content_h)
+
+    c.rect(MARGIN, y - BUYER_H, CONTENT_W, BUYER_H)
+    c.line(mid_b, y - BUYER_H, mid_b, y)
+
+    _draw_rows(left_layout, MARGIN + 3 * mm, y - first_off)
+    _draw_rows(right_layout, mid_b + 3 * mm, y - first_off)
 
     y -= BUYER_H
     y -= 2 * mm
@@ -593,8 +775,15 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
                 alic_id = int(iv["Id"])
                 porc_desc = IVA_ALICUOTAS.get(alic_id, {}).get("desc", f"Alic. {alic_id}")
                 totals_data.append([f"IVA {porc_desc}: $", _fmt_num(iv.get("Importe", "0.00"))])
-        elif resp.imp_iva:
-            totals_data.append(["IVA 21%: $", _fmt_num(resp.imp_iva)])
+        elif resp.items and _iva_contenido(resp) > Decimal("0.00"):
+            iva_por_alic = defaultdict(Decimal)
+            for it in resp.items:
+                if getattr(it, "iva_monto", Decimal("0.00")) > Decimal("0.00"):
+                    iva_por_alic[it.alicuota_iva] += it.iva_monto
+            for alic_val, monto_iva in sorted(iva_por_alic.items()):
+                totals_data.append([f"IVA {format(Decimal(alic_val).normalize(), 'f')}%: $", _fmt_num(monto_iva)])
+        elif _iva_contenido(resp) > Decimal("0.00"):
+            totals_data.append(["IVA 21%: $", _fmt_num(_iva_contenido(resp))])
 
         totals_data.append(["Importe Otros Tributos: $", _fmt_num(resp.imp_trib or Decimal("0.00"))])
         totals_data.append(["Importe Total: $", _fmt_num(resp.monto)])
@@ -617,18 +806,7 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
     elif es_factura_b:
         # Régimen de Transparencia Fiscal al Consumidor (Ley 27.743 - RG 5614/2024)
         # Aplica a Responsables Inscriptos cuando emiten Factura B a Consumidor Final
-        iva_contenido = Decimal("0.00")
-        if getattr(resp, "imp_iva", None) and resp.imp_iva > Decimal("0.00"):
-            iva_contenido = resp.imp_iva
-        elif getattr(resp, "ivas", None):
-            try:
-                iva_contenido = sum(Decimal(str(iv.get("Importe", 0))) for iv in resp.ivas)
-            except Exception:
-                pass
-        elif getattr(resp, "imp_neto", None):
-            iva_calc = resp.monto - resp.imp_neto - (resp.imp_trib or Decimal("0.00"))
-            if iva_calc > Decimal("0.00"):
-                iva_contenido = iva_calc
+        iva_contenido = _iva_contenido(resp)
 
         otros_trib = resp.imp_trib or Decimal("0.00")
 

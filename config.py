@@ -27,6 +27,8 @@ class Config:
     domicilio_fiscal: str = ""
     condicion_iva_emisor: str = ""
     logo_path: str = ""
+    logo_height_mm: float = 16.0   # alto máximo del logo en el PDF (mm)
+    logo_width_mm: float = 0.0     # ancho máximo del logo (mm); 0 = todo el ancho disponible
     leyenda: str = ""
     watermark_text: str = ""
     watermark_image: str = ""
@@ -58,6 +60,16 @@ class Config:
         if self.env == "prod":
             return "https://aws.afip.gov.ar/sr-padron/webservices/personaServiceA13?WSDL"
         return "https://awshomo.afip.gob.ar/sr-padron/webservices/personaServiceA13?WSDL"
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name, "").strip().replace(",", ".")
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
 
 
 def _resolve_cache_path(base: str, env: str, cuit: str = "") -> str:
@@ -138,6 +150,8 @@ def load_config(env: str = "homo", dry_run: bool = False) -> Config:
         domicilio_fiscal=os.getenv("AFIP_DOMICILIO_FISCAL", "") or os.getenv("AFIP_DOMICILIO", ""),
         condicion_iva_emisor=os.getenv("AFIP_CONDICION_IVA_EMISOR", ""),
         logo_path=os.getenv("AFIP_LOGO_PATH", ""),
+        logo_height_mm=_env_float("AFIP_LOGO_HEIGHT_MM", 16.0),
+        logo_width_mm=_env_float("AFIP_LOGO_WIDTH_MM", 0.0),
         leyenda=os.getenv("AFIP_LEYENDA", ""),
         watermark_text=os.getenv("AFIP_WATERMARK_TEXT", ""),
         watermark_image=os.getenv("AFIP_WATERMARK_IMAGE", ""),

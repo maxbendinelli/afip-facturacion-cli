@@ -1289,6 +1289,9 @@ function setupPdfCustomization() {
   const wmInput = document.getElementById("watermark-file-input");
   const wmPathInput = document.getElementById("cfg-watermark-image");
 
+  const btnRemoveLogo = document.getElementById("btn-remove-logo");
+  const logoHeightInput = document.getElementById("cfg-logo-height");
+
   btnUploadLogo.addEventListener("click", () => logoInput.click());
   logoInput.addEventListener("change", async (e) => {
     if (!e.target.files.length) return;
@@ -1303,12 +1306,29 @@ function setupPdfCustomization() {
 
       logoPathInput.value = `./${data.path}`;
       logoPreviewBox.innerHTML = `<img src="${data.url}" alt="Logo preview">`;
-      try { await saveConfig(); } catch (e) {}
+      try { await saveConfig(true); } catch (e) {}
       showToast("Logo subido y guardado correctamente.", "success");
     } catch (err) {
       showToast(`Error subiendo logo: ${err.message}`, "error");
+    } finally {
+      logoInput.value = "";
     }
   });
+
+  if (btnRemoveLogo) {
+    btnRemoveLogo.addEventListener("click", async () => {
+      logoPathInput.value = "";
+      logoPreviewBox.innerHTML = `<span class="text-dim">Sin logo cargado</span>`;
+      try { await saveConfig(true); } catch (e) {}
+      showToast("Logo quitado.", "info");
+    });
+  }
+
+  if (logoHeightInput) {
+    logoHeightInput.addEventListener("change", async () => {
+      try { await saveConfig(true); } catch (e) {}
+    });
+  }
 
   btnUploadWm.addEventListener("click", () => wmInput.click());
   wmInput.addEventListener("change", async (e) => {
@@ -1336,6 +1356,7 @@ function setupPdfCustomization() {
     try {
       const payload = {
         logo_path: document.getElementById("cfg-logo-path").value.trim(),
+        logo_height_mm: parseFloat(document.getElementById("cfg-logo-height")?.value) || 16,
         ingresos_brutos: document.getElementById("cfg-ingresos-brutos").value.trim(),
         razon_social: document.getElementById("cfg-razon-social").value.trim(),
         domicilio: document.getElementById("cfg-domicilio").value.trim(),
@@ -1575,8 +1596,14 @@ async function loadConfig() {
       }
       condSelect.value = valCond;
     }
-    document.getElementById("cfg-inicio-actividades").value = appConfig.inicio_actividades;
+    document.getElementById("cfg-domicilio").value = appConfig.domicilio || "";
+    document.getElementById("cfg-ingresos-brutos").value = appConfig.ingresos_brutos || "";
+    document.getElementById("cfg-inicio-actividades").value = appConfig.inicio_actividades || "";
     document.getElementById("cfg-limite-cf").value = appConfig.limite_cf;
+    const logoHeightEl = document.getElementById("cfg-logo-height");
+    if (logoHeightEl) {
+      logoHeightEl.value = appConfig.logo_height_mm || 16;
+    }
 
     document.getElementById("cfg-cert-homo").value = appConfig.cert_path_homo;
     document.getElementById("cfg-key-homo").value = appConfig.key_path_homo;
@@ -1602,7 +1629,9 @@ async function loadConfig() {
     }
 
     if (appConfig.logo_path) {
-      document.getElementById("logo-preview-box").innerHTML = `<img src="${appConfig.logo_path}" alt="Logo">`;
+      document.getElementById("logo-preview-box").innerHTML = `<img src="${appConfig.logo_path}?t=${Date.now()}" alt="Logo">`;
+    } else {
+      document.getElementById("logo-preview-box").innerHTML = `<span class="text-dim">Sin logo cargado</span>`;
     }
 
     updateCertBadges(appConfig);
@@ -1666,6 +1695,7 @@ async function saveConfig(silent = false) {
     domicilio: document.getElementById("cfg-domicilio").value.trim(),
     condicion_iva_emisor: document.getElementById("cfg-cond-iva-emisor").value,
     logo_path: document.getElementById("cfg-logo-path").value.trim(),
+    logo_height_mm: parseFloat(document.getElementById("cfg-logo-height")?.value) || 16,
     leyenda: document.getElementById("cfg-leyenda").value.trim(),
     watermark_text: document.getElementById("cfg-watermark-text").value.trim(),
     watermark_image: document.getElementById("cfg-watermark-image").value.trim(),

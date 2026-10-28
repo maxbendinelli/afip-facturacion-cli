@@ -33,6 +33,7 @@ def open_browser(url: str) -> None:
 
 
 def main():
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
     host = "127.0.0.1"
     port = 8000
 
@@ -54,7 +55,7 @@ def main():
         host=host,
         port=port,
         log_level="info",
-        reload=False,
+        reload=True,
     )
 
 

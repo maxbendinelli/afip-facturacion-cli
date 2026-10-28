@@ -780,6 +780,12 @@
                     <div class="file-picker-row">
                       <input type="text" id="cfg-logo-path" placeholder="./static/uploads/logo.png">
                       <button type="button" class="btn btn-secondary btn-sm" id="btn-upload-logo">📁 Subir Logo</button>
+                      <button type="button" class="btn btn-secondary btn-sm" id="btn-remove-logo" title="Quitar logo">🗑️ Quitar</button>
+                    </div>
+                    <div style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
+                      <label for="cfg-logo-height" style="margin: 0; font-size: 0.8rem; color: var(--text-muted); white-space: nowrap;">Alto en factura (mm):</label>
+                      <input type="number" id="cfg-logo-height" min="6" max="60" step="1" value="16" style="max-width: 85px; padding: 4px 8px; font-size: 0.85rem;" title="Alto máximo del logo en milímetros (6 a 60 mm). La cabecera se amplía automáticamente si es más alto.">
+                      <span style="font-size: 0.75rem; color: var(--text-dim);">(por defecto 16 mm, máx 60 mm)</span>
                     </div>
                     <input type="file" id="logo-file-input" accept="image/png,image/jpeg" class="hidden">
                   </div>

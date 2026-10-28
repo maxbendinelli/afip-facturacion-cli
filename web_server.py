@@ -35,7 +35,7 @@ from models import (
     InvoiceResponse,
 )
 from padron import buscar_persona
-from pdf_generator import generate_pdf, format_pdf_filename
+from pdf_generator import generate_pdf, format_pdf_filename, pdf_filename_for
 from mailer import send_invoice_email, test_smtp_connection, is_smtp_configured
 from validators import validar_cuit_afip, validar_formato_cuit
 from wsaa import get_token_sign
@@ -171,6 +171,8 @@ class PreviewSampleIn(BaseModel):
     domicilio: Optional[str] = None
     condicion_iva_emisor: Optional[str] = None
     logo_path: Optional[str] = None
+    logo_height_mm: Optional[float] = None
+    logo_width_mm: Optional[float] = None
     ingresos_brutos: Optional[str] = None
     inicio_actividades: Optional[str] = None
     leyenda: Optional[str] = None
@@ -188,6 +190,8 @@ class ConfigIn(BaseModel):
     domicilio: Optional[str] = ""
     condicion_iva_emisor: Optional[str] = ""
     logo_path: Optional[str] = ""
+    logo_height_mm: Optional[float] = 16.0
+    logo_width_mm: Optional[float] = 0.0
     leyenda: Optional[str] = ""
     watermark_text: Optional[str] = ""
     watermark_image: Optional[str] = ""
@@ -408,6 +412,8 @@ def get_config():
         "domicilio": cfg.domicilio if cfg else os.getenv("AFIP_DOMICILIO", ""),
         "condicion_iva_emisor": cfg.condicion_iva_emisor if cfg else os.getenv("AFIP_CONDICION_IVA_EMISOR", ""),
         "logo_path": cfg.logo_path if cfg else os.getenv("AFIP_LOGO_PATH", ""),
+        "logo_height_mm": cfg.logo_height_mm if cfg else 16.0,
+        "logo_width_mm": cfg.logo_width_mm if cfg else 0.0,
         "leyenda": cfg.leyenda if cfg else os.getenv("AFIP_LEYENDA", ""),
         "watermark_text": cfg.watermark_text if cfg else os.getenv("AFIP_WATERMARK_TEXT", ""),
         "watermark_image": cfg.watermark_image if cfg else os.getenv("AFIP_WATERMARK_IMAGE", ""),
@@ -449,6 +455,8 @@ def update_config(payload: ConfigIn):
         "AFIP_DOMICILIO": payload.domicilio or "",
         "AFIP_CONDICION_IVA_EMISOR": payload.condicion_iva_emisor or "",
         "AFIP_LOGO_PATH": payload.logo_path or "",
+        "AFIP_LOGO_HEIGHT_MM": f"{payload.logo_height_mm:g}" if payload.logo_height_mm else "16",
+        "AFIP_LOGO_WIDTH_MM": f"{payload.logo_width_mm:g}" if payload.logo_width_mm else "0",
         "AFIP_LEYENDA": payload.leyenda or "",
         "AFIP_WATERMARK_TEXT": payload.watermark_text or "",
         "AFIP_WATERMARK_IMAGE": payload.watermark_image or "",
@@ -831,7 +839,11 @@ def emitir_comprobante(payload: EmitirIn):
         pv = cfg.punto_venta or 4
         letra = CBTE_LETRA.get(payload.cbte_tipo, "C").lower()
         sim_num = 9999
-        pdf_name = format_pdf_filename(nombre_cliente, fecha=fecha, directory=COMPROBANTES_DIR)
+        pdf_name = format_pdf_filename(
+            nombre_cliente, fecha=fecha, directory=COMPROBANTES_DIR,
+            cbte_tipo=payload.cbte_tipo, cuit_emisor=cfg.cuit, punto_venta=pv, numero=sim_num,
+            periodo_desde=periodo_desde if payload.concepto_afip in (2, 3) else None,
+        )
         pdf_path = COMPROBANTES_DIR / pdf_name
         sim_op_ex = Decimal("0.00")
         sim_tot_conc = Decimal("0.00")
@@ -994,7 +1006,7 @@ def emitir_comprobante(payload: EmitirIn):
         resp.domicilio_cliente = datos_padron["domicilio"]
 
     letra = CBTE_LETRA.get(resp.cbte_tipo, "C").lower()
-    pdf_filename = format_pdf_filename(resp.nombre_cliente, fecha=resp.fecha, hora=resp.hora, directory=COMPROBANTES_DIR)
+    pdf_filename = pdf_filename_for(cfg, resp, directory=COMPROBANTES_DIR)
     pdf_path = COMPROBANTES_DIR / pdf_filename
     root_pdf_path = BASE_DIR / pdf_filename
 
@@ -1441,7 +1453,12 @@ def emitir_lote(payload: LoteEmitirIn):
             if payload.dry_run:
                 pv = cfg.punto_venta or 4
                 letra = CBTE_LETRA.get(item.cbte_tipo, "C").lower()
-                pdf_name = format_pdf_filename(item.nombre_cliente, fecha=item.fecha or hoy, directory=COMPROBANTES_DIR)
+                pdf_name = format_pdf_filename(
+                    item.nombre_cliente, fecha=item.fecha or hoy, directory=COMPROBANTES_DIR,
+                    cbte_tipo=item.cbte_tipo, cuit_emisor=cfg.cuit, punto_venta=pv,
+                    numero=int(item.index) if str(item.index).isdigit() else 9999,
+                    periodo_desde=item.periodo_desde,
+                )
                 pdf_path = COMPROBANTES_DIR / pdf_name
 
                 # Generar comprobante PDF simulado de prueba
@@ -1574,7 +1591,12 @@ def emitir_lote(payload: LoteEmitirIn):
 
             # Generar PDF
             letra = CBTE_LETRA.get(resp.cbte_tipo, "C").lower()
-            pdf_name = format_pdf_filename(resp.nombre_cliente, fecha=resp.fecha, hora=resp.hora, directory=COMPROBANTES_DIR)
+            pdf_name = format_pdf_filename(
+                resp.nombre_cliente, fecha=resp.fecha, hora=resp.hora, directory=COMPROBANTES_DIR,
+                cbte_tipo=resp.cbte_tipo, cuit_emisor=cfg.cuit, punto_venta=resp.punto_venta,
+                numero=resp.numero,
+                periodo_desde=serv_desde if item.concepto_afip in (2, 3) else None,
+            )
             generate_pdf(cfg, resp, str(COMPROBANTES_DIR / pdf_name), duplicado=payload.duplicado, triplicado=getattr(payload, 'triplicado', False), copias=getattr(payload, 'copias', 1))
 
             resp_dict = resp.to_json()
@@ -1684,6 +1706,10 @@ def preview_sample_pdf(payload: Optional[PreviewSampleIn] = None):
             cfg.condicion_iva_emisor = payload.condicion_iva_emisor
         if payload.logo_path is not None:
             cfg.logo_path = payload.logo_path
+        if payload.logo_height_mm:
+            cfg.logo_height_mm = payload.logo_height_mm
+        if payload.logo_width_mm is not None:
+            cfg.logo_width_mm = payload.logo_width_mm
         if payload.ingresos_brutos is not None:
             cfg.ingresos_brutos = payload.ingresos_brutos
         if payload.inicio_actividades is not None:
@@ -1699,9 +1725,8 @@ def preview_sample_pdf(payload: Optional[PreviewSampleIn] = None):
         InvoiceItem(descripcion="Servicio de Desarrollo de Software y APIs", cantidad=Decimal("1.00"), precio_unitario=Decimal("85000.00"), alicuota_iva=Decimal("21.0"), alicuota_iva_id=5),
         InvoiceItem(descripcion="Mantenimiento preventivo mensual", cantidad=Decimal("1.00"), precio_unitario=Decimal("25000.00"), alicuota_iva=Decimal("21.0"), alicuota_iva_id=5),
     ]
-    subtotal_neto = sum(i.subtotal for i in items)
-    iva_total = sum(i.iva_monto for i in items)
-    monto_total = subtotal_neto + iva_total
+    items_sum = sum(i.subtotal for i in items)
+    iva_items_neto = sum(i.iva_monto for i in items)
 
     is_monotributo = any(m in (cfg.condicion_iva_emisor or "").lower() for m in ["monotribut", "exento", "no alcanzado", "eventual"])
     if payload and payload.cbte_tipo:
@@ -1712,6 +1737,23 @@ def preview_sample_pdf(payload: Optional[PreviewSampleIn] = None):
     preview_cuit = "0"
     preview_doc_tipo = 99
     preview_cond_rec = 5
+
+    if preview_tipo in (1, 2, 3, 4):
+        # Factura A: precios netos, el IVA se suma
+        subtotal_neto = items_sum
+        iva_total = iva_items_neto
+        monto_total = subtotal_neto + iva_total
+    elif preview_tipo in (6, 7, 8, 9):
+        # Factura B: precios finales, el IVA está contenido
+        monto_total = items_sum
+        subtotal_neto = (monto_total / Decimal("1.21")).quantize(Decimal("0.01"))
+        iva_total = monto_total - subtotal_neto
+    else:
+        # Factura C: sin IVA discriminado
+        subtotal_neto = items_sum
+        iva_total = Decimal("0.00")
+        monto_total = items_sum
+    con_iva = preview_tipo in (1, 2, 3, 4, 6, 7, 8, 9)
 
     sample_resp = InvoiceResponse(
         cae="74251829304918",
@@ -1728,8 +1770,8 @@ def preview_sample_pdf(payload: Optional[PreviewSampleIn] = None):
         condicion_iva_receptor=preview_cond_rec,
         items=items,
         imp_neto=subtotal_neto,
-        imp_iva=iva_total if not is_monotributo else Decimal("0.00"),
-        ivas=[{"Id": 5, "BaseImp": str(subtotal_neto), "Importe": str(iva_total)}] if not is_monotributo else [],
+        imp_iva=iva_total if con_iva else Decimal("0.00"),
+        ivas=[{"Id": 5, "BaseImp": str(subtotal_neto), "Importe": str(iva_total)}] if con_iva else [],
         hora="123045",
         periodo_desde=date.today().replace(day=1).strftime("%Y%m%d"),
         periodo_hasta=date.today().strftime("%Y%m%d"),
@@ -1800,14 +1842,53 @@ def reimprimir_comprobante(payload: ReimprimirIn, env: Optional[str] = Query(Non
         token, sign = get_token_sign(cfg)
         data = consultar_comprobante(cfg, token, sign, payload.cbte_tipo, payload.numero)
 
-        nombre_cliente = "Consumidor Final"
-        if data.get("doc_nro") and data["doc_nro"] != "0":
+        letra = CBTE_LETRA.get(int(data["cbte_tipo"]), "C").lower()
+        json_path = COMPROBANTES_DIR / f"comprobante_{letra}_{int(data['punto_venta']):04d}_{int(data['numero']):08d}.json"
+        saved: dict = {}
+        if json_path.exists():
             try:
-                p = buscar_persona(cfg, data["doc_nro"])
-                if p and p.get("nombre"):
-                    nombre_cliente = p["nombre"]
+                with open(json_path, "r", encoding="utf-8") as f:
+                    saved = json.load(f) or {}
             except Exception:
-                pass
+                saved = {}
+
+        def _dec(v) -> Optional[Decimal]:
+            if v is None or v == "":
+                return None
+            try:
+                return Decimal(str(v))
+            except Exception:
+                return None
+
+        nombre_cliente = saved.get("cliente") or ""
+        if not nombre_cliente:
+            nombre_cliente = "Consumidor Final"
+            if data.get("doc_nro") and data["doc_nro"] != "0":
+                try:
+                    p = buscar_persona(cfg, data["doc_nro"])
+                    if p and p.get("nombre"):
+                        nombre_cliente = p["nombre"]
+                except Exception:
+                    pass
+
+        items_rec = []
+        for it in saved.get("items") or []:
+            try:
+                items_rec.append(InvoiceItem(
+                    descripcion=it.get("descripcion", ""),
+                    cantidad=Decimal(str(it.get("cantidad", "1"))),
+                    precio_unitario=Decimal(str(it.get("precio_unitario", "0"))),
+                    alicuota_iva=Decimal(str(it.get("alicuota_iva", "21.0"))),
+                    alicuota_iva_id=int(it.get("alicuota_iva_id", 5)),
+                    tipo_iva=it.get("tipo_iva", "iva"),
+                ))
+            except Exception:
+                items_rec = []
+                break
+
+        def _pick(key):
+            v = _dec(saved.get(key))
+            return v if v is not None else _dec(data.get(key))
 
         resp = InvoiceResponse(
             cae=data["cae"],
@@ -1821,31 +1902,35 @@ def reimprimir_comprobante(payload: ReimprimirIn, env: Optional[str] = Query(Non
             cuit_cliente=data["doc_nro"],
             resultado=data.get("resultado", "A"),
             doc_tipo=data.get("doc_tipo", 99),
+            condicion_venta=saved.get("condicion_venta") or "Contado",
             condicion_iva_receptor=data.get("condicion_iva_receptor", 5),
-            periodo_desde=data.get("periodo_desde"),
-            periodo_hasta=data.get("periodo_hasta"),
-            hora=data.get("hora"),
+            concepto=saved.get("concepto", ""),
+            periodo_desde=saved.get("periodo_desde") or data.get("periodo_desde"),
+            periodo_hasta=saved.get("periodo_hasta") or data.get("periodo_hasta"),
+            domicilio_cliente=saved.get("domicilio_cliente"),
+            hora=saved.get("hora") or data.get("hora"),
+            fecha_vto_pago=saved.get("fecha_vto_pago"),
+            items=items_rec,
+            imp_neto=_pick("imp_neto"),
+            imp_iva=_pick("imp_iva"),
+            imp_trib=_pick("imp_trib"),
+            imp_op_ex=_pick("imp_op_ex"),
+            imp_tot_conc=_pick("imp_tot_conc"),
+            ivas=saved.get("ivas") or data.get("ivas") or [],
         )
 
-        letra = CBTE_LETRA.get(resp.cbte_tipo, "C").lower()
-        json_path = COMPROBANTES_DIR / f"comprobante_{letra}_{resp.punto_venta:04d}_{resp.numero:08d}.json"
-        existing_pdf = None
-        if json_path.exists():
-            try:
-                with open(json_path, "r", encoding="utf-8") as f:
-                    d = json.load(f)
-                    existing_pdf = d.get("pdf_filename")
-            except Exception:
-                pass
-
-        if existing_pdf:
-            pdf_filename = existing_pdf
-        else:
-            pdf_filename = format_pdf_filename(nombre_cliente, fecha=resp.fecha, hora=resp.hora, directory=COMPROBANTES_DIR)
-
+        pdf_filename = pdf_filename_for(cfg, resp, reuse_existing=True)
         pdf_path = COMPROBANTES_DIR / pdf_filename
 
         generate_pdf(cfg, resp, str(pdf_path), duplicado=payload.duplicado, triplicado=getattr(payload, 'triplicado', False), copias=getattr(payload, 'copias', 1))
+
+        if json_path.exists():
+            try:
+                saved["pdf_filename"] = pdf_filename
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(saved, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
 
         return {
             "status": "ok",
