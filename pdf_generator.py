@@ -302,19 +302,19 @@ def _iva_contenido(resp: InvoiceResponse) -> Decimal:
         if total > zero:
             return total
 
-    total_items = zero
-    for it in getattr(resp, "items", None) or []:
-        alic_id = getattr(it, "alicuota_iva_id", 5)
-        alic = _dec(getattr(it, "alicuota_iva", 0))
-        if getattr(it, "tipo_iva", "iva") != "iva" or alic_id in (1, 2, 3) or alic <= zero:
-            continue
-        if resp.cbte_tipo in (1, 2, 3, 4):
-            total_items += _dec(it.iva_monto)           # precio neto: IVA se suma
-        else:
-            bruto = _dec(it.subtotal)                   # precio final: IVA contenido
-            neto = (bruto / (Decimal("1") + alic / Decimal("100"))).quantize(Decimal("0.01"))
-            total_items += bruto - neto
-    if total_items > zero:
+    if getattr(resp, "items", None):
+        total_items = zero
+        for it in resp.items:
+            alic_id = getattr(it, "alicuota_iva_id", 5)
+            alic = _dec(getattr(it, "alicuota_iva", 0))
+            if getattr(it, "tipo_iva", "iva") != "iva" or alic_id in (1, 2, 3) or alic <= zero:
+                continue
+            if resp.cbte_tipo in (1, 2, 3, 4):
+                total_items += _dec(it.iva_monto)           # precio neto: IVA se suma
+            else:
+                bruto = _dec(it.subtotal)                   # precio final: IVA contenido
+                neto = (bruto / (Decimal("1") + alic / Decimal("100"))).quantize(Decimal("0.01"))
+                total_items += bruto - neto
         return total_items
 
     if getattr(resp, "imp_neto", None) is not None:

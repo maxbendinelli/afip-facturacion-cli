@@ -143,7 +143,7 @@ def solicitar_cae(config: Config, token: str, sign: str, req: InvoiceRequest) ->
                     if imp_op_ex_items > 0 and req.imp_op_ex == Decimal("0.00"):
                         req.imp_op_ex = imp_op_ex_items
 
-                    imp_total = sum(it.subtotal for it in req.items) + req.imp_trib + req.imp_tot_conc
+                    imp_total = imp_neto + imp_iva + req.imp_trib + req.imp_op_ex + req.imp_tot_conc
 
                 ivas = [
                     {

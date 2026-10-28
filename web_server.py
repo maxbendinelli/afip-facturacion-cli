@@ -254,6 +254,8 @@ class LoteRowIn(BaseModel):
     domicilio_cliente: Optional[str] = None
     concepto: str = "Servicio"
     monto: float = 0.0
+    neto: Optional[float] = None
+    iva: Optional[float] = None
     alicuota_iva: float = 21.0
     alicuota_iva_id: Optional[int] = 5
     tipo_iva: Optional[str] = "iva"
@@ -1129,6 +1131,8 @@ async def parse_lote_csv(file: UploadFile = File(...)):
             return "concepto"
         if "tipo_comp" in c or "tipo_comprobante" in c or "tipo" == c:
             return "tipo"
+        if "iva_contenido" in c or "iva_monto" in c:
+            return "iva_contenido"
         if "total" in c or "importe" in c or "monto" in c:
             return "monto"
         if "alic" in c or "alicuota" in c:
@@ -1294,13 +1298,29 @@ async def parse_lote_csv(file: UploadFile = File(...)):
         status = "error" if errors else ("advertencia" if warnings else "valido")
 
         # Cálculos neto/IVA
+        iva_csv_raw = (row.get("iva_contenido") or "").replace("$", "").replace(" ", "").replace("-", "").strip()
+        iva_csv = None
+        if iva_csv_raw:
+            if "," in iva_csv_raw and "." in iva_csv_raw:
+                iva_csv_raw = iva_csv_raw.replace(".", "").replace(",", ".")
+            elif "," in iva_csv_raw:
+                iva_csv_raw = iva_csv_raw.replace(",", ".")
+            try:
+                iva_csv = float(Decimal(iva_csv_raw))
+            except Exception:
+                iva_csv = None
+
         if tipo_str in ("A", "B"):
             if tipo_iva in ("no_gravado", "exento") or alic_id == 3 or alic_iva == 0.0:
                 neto = monto
                 iva = 0.0
             else:
-                neto = round(monto / (1 + (alic_iva / 100)), 2)
-                iva = round(monto - neto, 2)
+                if iva_csv is not None and iva_csv > 0 and abs(round(monto / (1 + (alic_iva / 100)), 2) + iva_csv - monto) <= 0.05:
+                    iva = round(iva_csv, 2)
+                    neto = round(monto - iva, 2)
+                else:
+                    neto = round(monto / (1 + (alic_iva / 100)), 2)
+                    iva = round(monto - neto, 2)
         else:
             neto = monto
             iva = 0.0
@@ -1429,26 +1449,90 @@ def emitir_lote(payload: LoteEmitirIn):
             doc_tipo, doc_nro = _parse_doc(item.cuit_cliente)
             hoy = date.today().strftime("%Y%m%d")
 
-            # Crear ítem
+            # Desglose de impuestos por ítem para el comprobante
             alic_dec = Decimal(str(item.alicuota_iva)).quantize(Decimal("0.1"))
-            tipo_it = getattr(item, "tipo_iva", None) or ("no_gravado" if getattr(item, "alicuota_iva_id", 5) == 1 else "exento" if getattr(item, "alicuota_iva_id", 5) == 2 else "iva")
-            alic_id = getattr(item, "alicuota_iva_id", None) or (1 if tipo_it == "no_gravado" else 2 if tipo_it == "exento" else 3 if alic_dec == Decimal("0.0") else 5)
-            
-            # Items según tipo de comprobante:
-            if item.cbte_tipo == 1:
-                # Factura A: monto del CSV es total, precio unitario de item es NETO
-                if tipo_it in ("no_gravado", "exento") or alic_id in (1, 2, 3) or alic_dec == Decimal("0.0"):
+            tipo_it = getattr(item, "tipo_iva", None) or (
+                "no_gravado" if getattr(item, "alicuota_iva_id", 5) == 1
+                else "exento" if getattr(item, "alicuota_iva_id", 5) == 2
+                else "iva"
+            )
+            alic_id = getattr(item, "alicuota_iva_id", None) or (
+                1 if tipo_it == "no_gravado"
+                else 2 if tipo_it == "exento"
+                else 3 if alic_dec == Decimal("0.0")
+                else 5
+            )
+
+            sim_op_ex = Decimal("0.00")
+            sim_tot_conc = Decimal("0.00")
+            sim_alics = defaultdict(lambda: {"base": Decimal("0.00"), "iva": Decimal("0.00")})
+
+            if item.cbte_tipo in (1, 2, 3, 4):
+                # Comprobantes A: el monto del CSV es el TOTAL final a facturar.
+                # Para ítems gravados en Factura A, precio_unitario es el NETO gravado.
+                if tipo_it == "no_gravado" or alic_id == 1:
+                    sim_tot_conc = monto_dec
                     neto_dec = monto_dec
-                    items_obj = [InvoiceItem(descripcion=item.concepto, cantidad=Decimal("1.00"), precio_unitario=neto_dec, alicuota_iva=Decimal("0.0"), alicuota_iva_id=alic_id, tipo_iva=tipo_it)]
+                    iva_dec = Decimal("0.00")
+                    items_obj = [InvoiceItem(descripcion=item.concepto, cantidad=Decimal("1.00"), precio_unitario=neto_dec, alicuota_iva=Decimal("0.0"), alicuota_iva_id=1, tipo_iva="no_gravado")]
+                elif tipo_it == "exento" or alic_id == 2:
+                    sim_op_ex = monto_dec
+                    neto_dec = monto_dec
+                    iva_dec = Decimal("0.00")
+                    items_obj = [InvoiceItem(descripcion=item.concepto, cantidad=Decimal("1.00"), precio_unitario=neto_dec, alicuota_iva=Decimal("0.0"), alicuota_iva_id=2, tipo_iva="exento")]
+                elif alic_id == 3 or alic_dec == Decimal("0.0"):
+                    neto_dec = monto_dec
+                    iva_dec = Decimal("0.00")
+                    sim_alics[3]["base"] = neto_dec
+                    sim_alics[3]["iva"] = Decimal("0.00")
+                    items_obj = [InvoiceItem(descripcion=item.concepto, cantidad=Decimal("1.00"), precio_unitario=neto_dec, alicuota_iva=Decimal("0.0"), alicuota_iva_id=3, tipo_iva="iva")]
                 else:
                     neto_dec = (monto_dec / (Decimal("1.00") + (alic_dec / Decimal("100")))).quantize(Decimal("0.01"))
-                    items_obj = [InvoiceItem(descripcion=item.concepto, cantidad=Decimal("1.00"), precio_unitario=neto_dec, alicuota_iva=alic_dec, alicuota_iva_id=alic_id, tipo_iva=tipo_it)]
-            elif item.cbte_tipo == 6:
-                # Factura B: monto del CSV es FINAL con IVA, precio unitario de item es FINAL con IVA
+                    iva_dec = monto_dec - neto_dec
+                    sim_alics[alic_id]["base"] = neto_dec
+                    sim_alics[alic_id]["iva"] = iva_dec
+                    items_obj = [InvoiceItem(descripcion=item.concepto, cantidad=Decimal("1.00"), precio_unitario=neto_dec, alicuota_iva=alic_dec, alicuota_iva_id=alic_id, tipo_iva="iva")]
+                sim_neto = sum(d["base"] for d in sim_alics.values())
+                sim_iva = sum(d["iva"] for d in sim_alics.values())
+
+            elif item.cbte_tipo in (6, 7, 8, 9):
+                # Comprobantes B: precio unitario del ítem es FINAL con IVA incluido.
+                # Se desglosa el IVA contenido para AFIP y Régimen de Transparencia Fiscal (Ley 27.743).
                 items_obj = [InvoiceItem(descripcion=item.concepto, cantidad=Decimal("1.00"), precio_unitario=monto_dec, alicuota_iva=alic_dec, alicuota_iva_id=alic_id, tipo_iva=tipo_it)]
+                if tipo_it == "no_gravado" or alic_id == 1:
+                    sim_tot_conc = monto_dec
+                    neto_dec = Decimal("0.00")
+                    iva_dec = Decimal("0.00")
+                elif tipo_it == "exento" or alic_id == 2:
+                    sim_op_ex = monto_dec
+                    neto_dec = Decimal("0.00")
+                    iva_dec = Decimal("0.00")
+                elif alic_id == 3 or alic_dec == Decimal("0.0"):
+                    neto_dec = monto_dec
+                    iva_dec = Decimal("0.00")
+                    sim_alics[3]["base"] = neto_dec
+                    sim_alics[3]["iva"] = Decimal("0.00")
+                else:
+                    neto_dec = (monto_dec / (Decimal("1.00") + (alic_dec / Decimal("100")))).quantize(Decimal("0.01"))
+                    iva_dec = monto_dec - neto_dec
+                    sim_alics[alic_id]["base"] = neto_dec
+                    sim_alics[alic_id]["iva"] = iva_dec
+                sim_neto = sum(d["base"] for d in sim_alics.values())
+                sim_iva = sum(d["iva"] for d in sim_alics.values())
+
             else:
-                # Factura C: monto es final sin IVA
+                # Comprobantes C u otros: sin IVA discriminado
                 items_obj = [InvoiceItem(descripcion=item.concepto, cantidad=Decimal("1.00"), precio_unitario=monto_dec, alicuota_iva=Decimal("0.0"), alicuota_iva_id=3, tipo_iva="iva")]
+                sim_neto = monto_dec
+                sim_iva = Decimal("0.00")
+                neto_dec = monto_dec
+                iva_dec = Decimal("0.00")
+
+            sim_ivas = [
+                {"Id": aid, "BaseImp": str(data["base"]), "Importe": str(data["iva"])}
+                for aid, data in sim_alics.items()
+                if aid in (3, 4, 5, 6, 8, 9) and data["base"] > 0
+            ]
 
             if payload.dry_run:
                 pv = cfg.punto_venta or 4
@@ -1495,8 +1579,11 @@ def emitir_lote(payload: LoteEmitirIn):
                     hora=datetime.now().strftime("%H%M%S"),
                     fecha_vto_pago=vto_pago,
                     items=items_obj,
-                    imp_neto=monto_dec if item.cbte_tipo not in (1, 6) or alic_dec == Decimal("0.0") else neto_dec,
-                    imp_iva=Decimal("0.00") if item.cbte_tipo not in (1, 6) or alic_dec == Decimal("0.0") else (monto_dec - neto_dec),
+                    imp_neto=sim_neto,
+                    imp_iva=sim_iva,
+                    imp_op_ex=sim_op_ex,
+                    imp_tot_conc=sim_tot_conc,
+                    ivas=sim_ivas,
                 )
                 generate_pdf(cfg, resp_sim, str(pdf_path), duplicado=payload.duplicado, triplicado=getattr(payload, 'triplicado', False), copias=getattr(payload, 'copias', 1))
 
@@ -1582,6 +1669,11 @@ def emitir_lote(payload: LoteEmitirIn):
                 condicion_iva_receptor=item.condicion_iva_receptor,
                 condicion_venta=item.condicion_venta or "Contado",
                 items=items_obj,
+                imp_neto=sim_neto,
+                imp_iva=sim_iva,
+                imp_op_ex=sim_op_ex,
+                imp_tot_conc=sim_tot_conc,
+                ivas=sim_ivas,
             )
 
             resp = solicitar_cae(cfg, token, sign, req)
