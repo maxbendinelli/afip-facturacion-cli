@@ -3,6 +3,7 @@ import glob
 import io
 import json
 import os
+import re
 import shutil
 import time
 import zipfile
@@ -245,6 +246,7 @@ class ReimprimirIn(BaseModel):
 
 
 class LoteRowIn(BaseModel):
+    row_idx: Optional[int] = None
     index: int = 0
     tipo: str = "C"
     cbte_tipo: int = 11
@@ -1353,6 +1355,7 @@ async def parse_lote_csv(file: UploadFile = File(...)):
             warnings.append(f"Ya emitido: Comprobante {cbte_val} (CAE: {cae_val})")
 
         rows.append({
+            "row_idx": idx,
             "index": raw_row.get("INDEX") or idx,
             "tipo": tipo_str,
             "cbte_tipo": cbte_tipo,
@@ -1418,16 +1421,18 @@ def emitir_lote(payload: LoteEmitirIn):
     max_permitida = hoy_dt + timedelta(days=10)
 
     # Ordenar cronológicamente por fecha de emisión para respetar la regla de AFIP (CbteFch_N >= CbteFch_{N-1})
-    def _row_date_key(it):
-        f = getattr(it, "fecha", None) or hoy_dt.strftime("%Y%m%d")
-        f_clean = str(f).replace("-", "").replace("/", "")
-        try:
-            idx_num = int(getattr(it, "index", 0))
-        except Exception:
-            idx_num = 0
-        return (f_clean, idx_num)
+    # y en caso de misma fecha, preservar el orden original de las filas del CSV.
+    def _row_sort_key(entry):
+        pos, it = entry
+        raw_f = getattr(it, "fecha", None)
+        f_canon = _parse_date_afip(raw_f) or str(raw_f or "").replace("-", "").replace("/", "") or hoy_dt.strftime("%Y%m%d")
+        file_order = getattr(it, "row_idx", None)
+        if file_order is None:
+            file_order = pos
+        return (f_canon, file_order)
 
-    sorted_rows = sorted(payload.rows, key=_row_date_key)
+    sorted_entries = sorted(enumerate(payload.rows), key=_row_sort_key)
+    sorted_rows = [it for _, it in sorted_entries]
 
     for item in sorted_rows:
         # Si ya fue autorizado con éxito, no duplicar emisión
@@ -1534,13 +1539,49 @@ def emitir_lote(payload: LoteEmitirIn):
                 if aid in (3, 4, 5, 6, 8, 9) and data["base"] > 0
             ]
 
+            cbte_tipo = item.cbte_tipo
+
+            # Consultar y mantener la numeración correlativa por tipo de comprobante
+            if cbte_tipo not in ult_cache:
+                last_nro = 0
+                last_fch = None
+                # Intentar consultar último comprobante oficial en AFIP
+                try:
+                    tok_to_use, sgn_to_use = token, sign
+                    if payload.dry_run and not tok_to_use and cfg.cert_path and os.path.exists(cfg.cert_path) and cfg.key_path and os.path.exists(cfg.key_path):
+                        tok_to_use, sgn_to_use = get_token_sign(cfg)
+                    if tok_to_use and sgn_to_use:
+                        last_nro, last_fch = get_ultimo_comprobante_info(cfg, tok_to_use, sgn_to_use, cbte_tipo)
+                except Exception:
+                    pass
+
+                # Si no se pudo consultar AFIP (offline o error), buscar el último comprobante emitido localmente
+                if last_nro == 0:
+                    letra = CBTE_LETRA.get(cbte_tipo, "C").lower()
+                    pv = cfg.punto_venta or 4
+                    for f in COMPROBANTES_DIR.glob(f"comprobante_{letra}_{pv:04d}_*.json"):
+                        try:
+                            partes = f.stem.split("_")
+                            if "sim" not in partes and len(partes) >= 4 and partes[-1].isdigit():
+                                n_val = int(partes[-1])
+                                if n_val > last_nro:
+                                    last_nro = n_val
+                        except Exception:
+                            pass
+
+                ult_cache[cbte_tipo] = {"nro": last_nro, "fecha": last_fch}
+
+            proximo_nro = ult_cache[cbte_tipo]["nro"] + 1
+
             if payload.dry_run:
+                # En simulación avanzamos la secuencia correlativa en memoria
+                ult_cache[cbte_tipo]["nro"] = proximo_nro
                 pv = cfg.punto_venta or 4
                 letra = CBTE_LETRA.get(item.cbte_tipo, "C").lower()
                 pdf_name = format_pdf_filename(
                     item.nombre_cliente, fecha=item.fecha or hoy, directory=COMPROBANTES_DIR,
                     cbte_tipo=item.cbte_tipo, cuit_emisor=cfg.cuit, punto_venta=pv,
-                    numero=int(item.index) if str(item.index).isdigit() else 9999,
+                    numero=proximo_nro,
                     periodo_desde=item.periodo_desde,
                 )
                 pdf_path = COMPROBANTES_DIR / pdf_name
@@ -1562,7 +1603,7 @@ def emitir_lote(payload: LoteEmitirIn):
                 resp_sim = InvoiceResponse(
                     cae="SIMULADO_CAE_123456",
                     cae_vencimiento=(hoy_dt + timedelta(days=10)).strftime("%Y%m%d"),
-                    numero=int(item.index) if str(item.index).isdigit() else 9999,
+                    numero=proximo_nro,
                     cbte_tipo=item.cbte_tipo,
                     punto_venta=pv,
                     fecha=item.fecha or hoy,
@@ -1592,7 +1633,7 @@ def emitir_lote(payload: LoteEmitirIn):
                 if item.email:
                     resp_dict["email_cliente"] = item.email
                     resp_dict["email_enviado"] = True if payload.enviar_email else None
-                with open(COMPROBANTES_DIR / f"comprobante_{letra}_{pv:04d}_sim_{item.index:04d}.json", "w", encoding="utf-8") as f:
+                with open(COMPROBANTES_DIR / f"comprobante_{letra}_{pv:04d}_sim_{proximo_nro:08d}.json", "w", encoding="utf-8") as f:
                     json.dump(resp_dict, f, ensure_ascii=False)
 
                 resultados.append({
@@ -1600,7 +1641,7 @@ def emitir_lote(payload: LoteEmitirIn):
                     "status": "ok",
                     "modo": "simulacion",
                     "tipo": item.tipo,
-                    "comprobante": f"{pv:04d}-SIM{item.index:04d}",
+                    "comprobante": f"{pv:04d}-{proximo_nro:08d}",
                     "cae": "SIMULADO_CAE_123456",
                     "cae_vencimiento": (hoy_dt + timedelta(days=10)).strftime("%Y%m%d"),
                     "monto": str(monto_dec),
@@ -1614,12 +1655,6 @@ def emitir_lote(payload: LoteEmitirIn):
                 continue
 
             # Modo Real AFIP
-            cbte_tipo = item.cbte_tipo
-            if cbte_tipo not in ult_cache:
-                nro, fch = get_ultimo_comprobante_info(cfg, token, sign, cbte_tipo)
-                ult_cache[cbte_tipo] = {"nro": nro, "fecha": fch}
-
-            proximo_nro = ult_cache[cbte_tipo]["nro"] + 1
 
             # Resolución estricta de fecha para cumplir con las reglas de AFIP:
             # 1. Ventana N-10 a N+10 de hoy
