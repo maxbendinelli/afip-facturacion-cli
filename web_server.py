@@ -152,6 +152,7 @@ class EmitirIn(BaseModel):
     fecha_vto_pago: Optional[str] = None
     cae: Optional[str] = None
     comprobante: Optional[str] = None
+    pdf_filename: Optional[str] = None
     status: Optional[str] = None
     monto: Optional[float] = None
     items: List[ItemIn] = []
@@ -270,6 +271,7 @@ class LoteRowIn(BaseModel):
     fecha_vto_pago: Optional[str] = None
     cae: Optional[str] = None
     comprobante: Optional[str] = None
+    pdf_filename: Optional[str] = None
     status: Optional[str] = None
 
 
@@ -1060,15 +1062,51 @@ def get_csv_template():
     )
 
 
+def _find_pdf_for_comprobante(comprobante_str: str, tipo_str: str = "") -> Optional[str]:
+    """Busca un archivo PDF existente asociado a un comprobante ya emitido."""
+    if not comprobante_str or "-" not in comprobante_str:
+        return None
+    try:
+        pv_s, nro_s = comprobante_str.split("-")
+        pv_i, nro_i = int(pv_s), int(nro_s)
+        letra_c = (tipo_str or "C").lower()
+
+        for pattern in (f"comprobante_{letra_c}_{pv_i:04d}_{nro_i:08d}.json", f"comprobante_*_{pv_i:04d}_{nro_i:08d}.json"):
+            for jf in COMPROBANTES_DIR.glob(pattern):
+                if "_sim_" in jf.name:
+                    continue
+                try:
+                    with open(jf, "r", encoding="utf-8") as f:
+                        d = json.load(f)
+                        cand = d.get("pdf_filename")
+                        if cand and (COMPROBANTES_DIR / cand).exists():
+                            return cand
+                except Exception:
+                    pass
+
+        for pat in (f"*_{pv_i:04d}_{nro_i:08d}.pdf", f"*_{pv_i:05d}_{nro_i:08d}.pdf", f"*{pv_i:04d}-{nro_i:08d}*.pdf"):
+            matches = list(COMPROBANTES_DIR.glob(pat))
+            if matches:
+                return matches[0].name
+    except Exception:
+        pass
+    return None
+
+
 def _get_existing_comprobantes_map() -> dict:
-    """Retorna un mapa (cuit, cbte_tipo, monto) -> dict de comprobante ya emitido."""
+    """Retorna un mapa (cuit, cbte_tipo, monto) -> dict de comprobante ya emitido oficialmente."""
     result = {}
     if not COMPROBANTES_DIR.exists():
         return result
     for p in COMPROBANTES_DIR.glob("comprobante_*.json"):
+        if "_sim_" in p.name:
+            continue
         try:
             with open(p, "r", encoding="utf-8") as f:
                 d = json.load(f)
+            cae_str = str(d.get("cae", "")).strip()
+            if not cae_str or cae_str.startswith("SIMULADO"):
+                continue
             cuit = str(d.get("cuit_cliente", "")).strip().replace("-", "")
             cbte_tipo = int(d.get("cbte_tipo", 0))
             monto_str = str(Decimal(str(d.get("monto", "0"))).quantize(Decimal("0.01")))
@@ -1437,6 +1475,10 @@ def emitir_lote(payload: LoteEmitirIn):
     for item in sorted_rows:
         # Si ya fue autorizado con éxito, no duplicar emisión
         if item.cae and str(item.cae).strip() and not payload.dry_run:
+            pdf_name = getattr(item, "pdf_filename", None)
+            if not pdf_name or not (COMPROBANTES_DIR / pdf_name).exists():
+                pdf_name = _find_pdf_for_comprobante(item.comprobante or "", item.tipo)
+
             resultados.append({
                 "index": item.index,
                 "status": "ok",
@@ -1445,6 +1487,9 @@ def emitir_lote(payload: LoteEmitirIn):
                 "cae": item.cae,
                 "monto": str(item.monto),
                 "cliente": item.nombre_cliente,
+                "email": item.email,
+                "email_enviado": None,
+                "pdf_filename": pdf_name,
                 "mensaje": "Comprobante ya autorizado previamente",
             })
             exitosos += 1
@@ -1800,10 +1845,18 @@ def download_lote_zip(lote_id: str):
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         for res in meta.get("resultados", []):
-            if res.get("status") == "ok" and res.get("pdf_filename"):
-                pdf_path = COMPROBANTES_DIR / res["pdf_filename"]
-                if pdf_path.exists():
-                    zip_file.write(pdf_path, arcname=res["pdf_filename"])
+            if res.get("status") == "ok":
+                pdf_name = res.get("pdf_filename")
+                pdf_path = COMPROBANTES_DIR / pdf_name if pdf_name else None
+
+                if not pdf_path or not pdf_path.exists():
+                    found_name = _find_pdf_for_comprobante(res.get("comprobante", ""), res.get("tipo", ""))
+                    if found_name:
+                        pdf_path = COMPROBANTES_DIR / found_name
+                        pdf_name = found_name
+
+                if pdf_path and pdf_path.exists():
+                    zip_file.write(pdf_path, arcname=pdf_name)
 
     zip_buffer.seek(0)
     return Response(
