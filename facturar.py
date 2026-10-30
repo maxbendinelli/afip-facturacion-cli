@@ -1119,6 +1119,8 @@ def cmd_lote(args) -> None:
                 condicion_iva_receptor=item["condicion_iva_receptor"],
                 condicion_venta=item["condicion_venta"],
                 items=items_obj,
+                periodo_desde=serv_desde if item["concepto_afip"] in (2, 3) else None,
+                periodo_hasta=serv_hasta if item["concepto_afip"] in (2, 3) else None,
             )
 
             resp = solicitar_cae(config, token, sign, req)

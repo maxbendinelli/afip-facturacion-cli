@@ -1754,6 +1754,8 @@ def emitir_lote(payload: LoteEmitirIn):
                 imp_op_ex=sim_op_ex,
                 imp_tot_conc=sim_tot_conc,
                 ivas=sim_ivas,
+                periodo_desde=serv_desde if item.concepto_afip in (2, 3) else None,
+                periodo_hasta=serv_hasta if item.concepto_afip in (2, 3) else None,
             )
 
             resp = solicitar_cae(cfg, token, sign, req)
