@@ -207,6 +207,32 @@ def _fmt_cuit(cuit: str) -> str:
     return cuit
 
 
+def _fmt_dni(dni: str) -> str:
+    """Formatea un DNI para su impresión: 11608603 → 11.608.603, 4250492 → 4.250.492."""
+    d = str(dni).strip()
+    if not (d.isdigit() and len(d) in (7, 8)):
+        return dni
+    grupos = []
+    while d:
+        grupos.append(d[-3:])
+        d = d[:-3]
+    return ".".join(reversed(grupos))
+
+
+def _fmt_doc_receptor(doc_tipo: int, doc_nro: str) -> str:
+    """Formatea el documento del receptor para impresión en el PDF.
+
+    CUIT/CUIL → XX-XXXXXXXX-X; DNI → XX.XXX.XXX. El resto se imprime tal cual.
+    AFIP/QR y el JSON guardado siempre usan el número crudo, sin formato.
+    """
+    if doc_tipo in (80, 86):  # CUIT / CUIL
+        n = str(doc_nro).strip()
+        return _fmt_cuit(n) if n.isdigit() else doc_nro
+    if doc_tipo == 96:        # DNI
+        return _fmt_dni(doc_nro)
+    return doc_nro
+
+
 def _fmt_fecha(yyyymmdd: str) -> str:
     if not yyyymmdd or len(yyyymmdd) != 8:
         return yyyymmdd or ""
@@ -554,7 +580,7 @@ def _draw_comprobante(c: canvas.Canvas, config: Config, resp: InvoiceResponse,
     doc_lbl = DOC_TIPO_NOMBRE.get(resp.doc_tipo, "")
     left_rows = []
     if doc_lbl and resp.cuit_cliente and resp.cuit_cliente != "0":
-        left_rows.append((f"{doc_lbl}:  ", str(resp.cuit_cliente)))
+        left_rows.append((f"{doc_lbl}:  ", _fmt_doc_receptor(resp.doc_tipo, resp.cuit_cliente)))
     else:
         left_rows.append(("", ""))   # mantiene el lugar, como en el modelo oficial
     left_rows.append(("Condición frente al IVA:  ",
