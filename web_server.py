@@ -1633,7 +1633,16 @@ def emitir_lote(payload: LoteEmitirIn):
 
                 # Generar comprobante PDF simulado de prueba
                 serv_desde = item.periodo_desde or (hoy[:6] + "01")
-                serv_hasta = item.periodo_hasta or hoy
+                if item.periodo_hasta:
+                    serv_hasta = item.periodo_hasta
+                elif item.periodo_desde:
+                    try:
+                        dt_d = datetime.strptime(item.periodo_desde, "%Y%m%d").date()
+                        serv_hasta = _last_day_of_month(dt_d).strftime("%Y%m%d")
+                    except Exception:
+                        serv_hasta = item.periodo_desde
+                else:
+                    serv_hasta = _last_day_of_month(hoy_dt).strftime("%Y%m%d")
                 vto_pago = item.fecha_vto_pago or (item.fecha or hoy)
 
                 domicilio_item = getattr(item, "domicilio_cliente", None)
@@ -1727,7 +1736,16 @@ def emitir_lote(payload: LoteEmitirIn):
 
             fecha_emision = dt_calc.strftime("%Y%m%d")
             serv_desde = item.periodo_desde or (hoy[:6] + "01")
-            serv_hasta = item.periodo_hasta or hoy
+            if item.periodo_hasta:
+                serv_hasta = item.periodo_hasta
+            elif item.periodo_desde:
+                try:
+                    dt_d = datetime.strptime(item.periodo_desde, "%Y%m%d").date()
+                    serv_hasta = _last_day_of_month(dt_d).strftime("%Y%m%d")
+                except Exception:
+                    serv_hasta = item.periodo_desde
+            else:
+                serv_hasta = _last_day_of_month(hoy_dt).strftime("%Y%m%d")
             vto_pago = item.fecha_vto_pago or fecha_emision
             if vto_pago < fecha_emision:
                 vto_pago = fecha_emision
@@ -1761,7 +1779,7 @@ def emitir_lote(payload: LoteEmitirIn):
             resp = solicitar_cae(cfg, token, sign, req)
             ult_cache[cbte_tipo] = {"nro": resp.numero, "fecha": resp.fecha}
             resp.hora = datetime.now().strftime("%H%M%S")
-            resp.fecha_vto_pago = hoy
+            resp.fecha_vto_pago = vto_pago
 
             # Generar PDF
             letra = CBTE_LETRA.get(resp.cbte_tipo, "C").lower()

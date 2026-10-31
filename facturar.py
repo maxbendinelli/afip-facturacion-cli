@@ -830,19 +830,44 @@ def cmd_lote(args) -> None:
         except Exception:
             continue
 
-    col_map = {
-        "destinatario factura": "nombre_cliente", "cliente": "nombre_cliente",
-        "dni/cuit": "cuit_cliente", "cuit": "cuit_cliente", "dni": "cuit_cliente",
-        "tipo comp.": "tipo", "tipo": "tipo",
-        "total": "monto", "importe": "monto", "monto": "monto",
-        "alic. iva %": "alicuota_iva", "iva": "alicuota_iva",
-        "fecha": "fecha", "f.emision": "fecha",
-        "desde": "periodo_desde", "hasta": "periodo_hasta",
-        "f.vto": "fecha_vto_pago", "concepto": "concepto",
-    }
+    def _norm_col(col: str) -> str:
+        c = (col or "").strip().lower()
+        c = c.replace(" ", "_").replace(".", "").replace("/", "_").replace("%", "")
+        c = c.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
+        if "destinatario" in c or "apellido_y_nombre" in c or "cliente" in c or "razon_social" in c:
+            return "nombre_cliente"
+        if "mail" in c or "correo" in c:
+            return "email"
+        if "domicilio" in c or "direccion" in c:
+            return "domicilio_cliente"
+        if "dni" in c or "cuit" in c:
+            return "cuit_cliente"
+        if "producto" in c or "servicio" in c or "concepto" in c or "descripcion" in c:
+            return "concepto"
+        if "tipo_comp" in c or "tipo_comprobante" in c or c == "tipo":
+            return "tipo"
+        if "iva_contenido" in c or "iva_monto" in c:
+            return "iva_contenido"
+        if "total" in c or "importe" in c or "monto" in c:
+            return "monto"
+        if "alic" in c or "alicuota" in c:
+            return "alicuota_iva"
+        if "condicion_frente" in c or "condicion_iva" in c:
+            return "condicion_iva"
+        if "condicion_de_venta" in c:
+            return "condicion_venta"
+        if "emision" in c or "fecha_de_emision" in c:
+            return "fecha"
+        if "vto" in c or "vencimiento" in c:
+            return "fecha_vto_pago"
+        if "desde" in c:
+            return "periodo_desde"
+        if "hasta" in c:
+            return "periodo_hasta"
+        return c
 
     for idx, raw_row in enumerate(reader, 1):
-        row = {col_map.get(k.strip().lower(), k.strip().lower()): v for k, v in raw_row.items() if k}
+        row = {_norm_col(k): v for k, v in raw_row.items() if k}
         if str(row.get("factura") or "").strip().upper() == "NO":
             continue
 
