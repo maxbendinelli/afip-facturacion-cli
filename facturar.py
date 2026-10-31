@@ -826,6 +826,11 @@ def cmd_lote(args) -> None:
             cuit_e = str(d.get("cuit_cliente", "")).strip().replace("-", "")
             cbte_e = int(d.get("cbte_tipo", 0))
             monto_e = str(Decimal(str(d.get("monto", "0"))).quantize(Decimal("0.01")))
+            p_desde_e = str(d.get("periodo_desde") or d.get("fecha") or "").replace("-", "").replace("/", "").strip()
+            mes_e = p_desde_e[:6] if len(p_desde_e) >= 6 and p_desde_e[:6].isdigit() else ""
+            d["mes"] = mes_e
+            if mes_e:
+                existing_map[f"{cuit_e}_{cbte_e}_{monto_e}_{mes_e}"] = d
             existing_map[f"{cuit_e}_{cbte_e}_{monto_e}"] = d
         except Exception:
             continue
@@ -834,12 +839,12 @@ def cmd_lote(args) -> None:
         c = (col or "").strip().lower()
         c = c.replace(" ", "_").replace(".", "").replace("/", "_").replace("%", "")
         c = c.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
+        if "domicilio" in c or "direccion" in c:
+            return "domicilio_cliente"
         if "destinatario" in c or "apellido_y_nombre" in c or "cliente" in c or "razon_social" in c:
             return "nombre_cliente"
         if "mail" in c or "correo" in c:
             return "email"
-        if "domicilio" in c or "direccion" in c:
-            return "domicilio_cliente"
         if "dni" in c or "cuit" in c:
             return "cuit_cliente"
         if "producto" in c or "servicio" in c or "concepto" in c or "descripcion" in c:
@@ -947,8 +952,15 @@ def cmd_lote(args) -> None:
         f_vto = _parse_d_afip(row.get("fecha_vto_pago"))
 
         monto_dec_str = str(Decimal(str(monto)).quantize(Decimal("0.01")))
-        exist_key = f"{doc_nro}_{cbte_tipo}_{monto_dec_str}"
-        exist_info = existing_map.get(exist_key)
+        p_desde_r = str(f_desde or f_emision or "").replace("-", "").replace("/", "").strip()
+        mes_r = p_desde_r[:6] if len(p_desde_r) >= 6 and p_desde_r[:6].isdigit() else ""
+        exist_info = None
+        if mes_r:
+            exist_info = existing_map.get(f"{doc_nro}_{cbte_tipo}_{monto_dec_str}_{mes_r}")
+        if not exist_info:
+            cand = existing_map.get(f"{doc_nro}_{cbte_tipo}_{monto_dec_str}")
+            if cand and not (cand.get("mes") and mes_r and cand.get("mes") != mes_r):
+                exist_info = cand
 
         parsed_rows.append({
             "index": int(raw_row.get("INDEX") or idx) if str(raw_row.get("INDEX") or idx).isdigit() else idx,
@@ -1068,6 +1080,7 @@ def cmd_lote(args) -> None:
                     monto=monto_dec,
                     nombre_cliente=item["nombre_cliente"],
                     cuit_cliente=item["doc_nro"],
+                    domicilio_cliente=item.get("domicilio_cliente"),
                     resultado="A",
                     doc_tipo=item["doc_tipo"],
                     condicion_iva_receptor=item["condicion_iva_receptor"],
@@ -1143,6 +1156,7 @@ def cmd_lote(args) -> None:
                 doc_nro=item["doc_nro"],
                 condicion_iva_receptor=item["condicion_iva_receptor"],
                 condicion_venta=item["condicion_venta"],
+                domicilio_cliente=item.get("domicilio_cliente"),
                 items=items_obj,
                 periodo_desde=serv_desde if item["concepto_afip"] in (2, 3) else None,
                 periodo_hasta=serv_hasta if item["concepto_afip"] in (2, 3) else None,

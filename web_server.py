@@ -1110,13 +1110,19 @@ def _get_existing_comprobantes_map() -> dict:
             cuit = str(d.get("cuit_cliente", "")).strip().replace("-", "")
             cbte_tipo = int(d.get("cbte_tipo", 0))
             monto_str = str(Decimal(str(d.get("monto", "0"))).quantize(Decimal("0.01")))
-            key = f"{cuit}_{cbte_tipo}_{monto_str}"
-            result[key] = {
+            p_desde = str(d.get("periodo_desde") or d.get("fecha") or "").replace("-", "").replace("/", "").strip()
+            mes = p_desde[:6] if len(p_desde) >= 6 and p_desde[:6].isdigit() else ""
+
+            info = {
                 "cae": d.get("cae"),
                 "comprobante": d.get("comprobante"),
                 "pdf_filename": d.get("pdf_filename"),
                 "fecha": d.get("fecha"),
+                "mes": mes,
             }
+            if mes:
+                result[f"{cuit}_{cbte_tipo}_{monto_str}_{mes}"] = info
+            result[f"{cuit}_{cbte_tipo}_{monto_str}"] = info
         except Exception:
             continue
     return result
@@ -1379,8 +1385,17 @@ async def parse_lote_csv(file: UploadFile = File(...)):
         # Chequear si ya existe emitido previamente
         monto_dec_str = str(Decimal(str(monto)).quantize(Decimal("0.01")))
         cuit_check = str(doc_nro).strip().replace("-", "")
-        exist_key = f"{cuit_check}_{cbte_tipo}_{monto_dec_str}"
-        exist_info = existing_map.get(exist_key)
+        p_desde_row = str(f_desde or f_emision or "").replace("-", "").replace("/", "").strip()
+        mes_row = p_desde_row[:6] if len(p_desde_row) >= 6 and p_desde_row[:6].isdigit() else ""
+
+        exist_info = None
+        if mes_row:
+            exist_info = existing_map.get(f"{cuit_check}_{cbte_tipo}_{monto_dec_str}_{mes_row}")
+        if not exist_info:
+            cand = existing_map.get(f"{cuit_check}_{cbte_tipo}_{monto_dec_str}")
+            # Si el existente tiene mes guardado y es distinto al del lote, no considerarlo duplicado (es otro mes/período)
+            if cand and not (cand.get("mes") and mes_row and cand.get("mes") != mes_row):
+                exist_info = cand
 
         cae_val = None
         cbte_val = None
@@ -1618,6 +1633,18 @@ def emitir_lote(payload: LoteEmitirIn):
 
             proximo_nro = ult_cache[cbte_tipo]["nro"] + 1
 
+            # Domicilio del receptor: usar el del CSV/lote y, para CUIT (doc_tipo 80)
+            # sin domicilio, completar desde el Padrón A13 (mismo criterio que la
+            # emisión individual).
+            domicilio_item = getattr(item, "domicilio_cliente", None)
+            if not domicilio_item and doc_tipo == 80:
+                try:
+                    p_info = buscar_persona(cfg, doc_nro)
+                    if p_info and p_info.get("domicilio"):
+                        domicilio_item = p_info["domicilio"]
+                except Exception:
+                    pass
+
             if payload.dry_run:
                 # En simulación avanzamos la secuencia correlativa en memoria
                 ult_cache[cbte_tipo]["nro"] = proximo_nro
@@ -1644,15 +1671,6 @@ def emitir_lote(payload: LoteEmitirIn):
                 else:
                     serv_hasta = _last_day_of_month(hoy_dt).strftime("%Y%m%d")
                 vto_pago = item.fecha_vto_pago or (item.fecha or hoy)
-
-                domicilio_item = getattr(item, "domicilio_cliente", None)
-                if not domicilio_item and doc_tipo == 80 and not payload.dry_run:
-                    try:
-                        p_info = buscar_persona(cfg, doc_nro)
-                        if p_info and p_info.get("domicilio"):
-                            domicilio_item = p_info["domicilio"]
-                    except Exception:
-                        pass
 
                 resp_sim = InvoiceResponse(
                     cae="SIMULADO_CAE_123456",
@@ -1774,6 +1792,7 @@ def emitir_lote(payload: LoteEmitirIn):
                 ivas=sim_ivas,
                 periodo_desde=serv_desde if item.concepto_afip in (2, 3) else None,
                 periodo_hasta=serv_hasta if item.concepto_afip in (2, 3) else None,
+                domicilio_cliente=domicilio_item,
             )
 
             resp = solicitar_cae(cfg, token, sign, req)

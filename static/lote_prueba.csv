@@ -1,7 +1,7 @@
 ﻿tipo;cuit_cliente;nombre_cliente;email;domicilio_cliente;concepto;monto;alicuota_iva;condicion_iva;condicion_venta;periodo_desde;periodo_hasta;fecha_vto_pago
-A;30712345671;Empresa Ejemplo S.A.;administracion@ejemplo.com;Av. Corrientes 1234, CABA;Servicios de Consultoría y Soporte IT;132500.00;21;RI;Cuenta Corriente;20261001;20261031;20261110
-A;30708912340;Distribuidora del Centro S.R.L.;ventas@distribuidoracentro.com;San Martín 456, Rosario, Santa Fe;Abono Mensual de Mantenimiento Preventivo;91500.00;10.5;RI;Contado;20261001;20261031;20261110
-B;20329876544;Lucas Gabriel Benítez;lucas.benitez@gmail.com;Belgrano 789, Córdoba;Servicio Técnico Especializado de Equipos;47500.00;21;CF;Contado;20261001;20261031;20261110
-B;27255684774;María Laura Fernández;mfernandez@estudiojuridico.com.ar;Calle 50 Nro 620, La Plata;Honorarios Profesionales de Asesoría;63500.00;21;MONO;Contado;20261001;20261031;20261110
-B;30546741253;Obra Social de Empleados;facturacion@obrasocial.org.ar;Leandro N. Alem 1050, CABA;Prestación Médica y Cuidados Asistenciales Especiales;285000.00;EXENTO;EXENTO;Cuenta Corriente;20261001;20261031;20261110
-B;SIN_CUIT;Consumidor Final;;;Venta de Insumos Menores de Oficina;19250.00;21;CF;Contado;;;
+A;30712345671;Empresa Ejemplo S.A.;administracion@ejemplo.com;Av. Corrientes 1234, CABA;Servicios de Consultoría y Soporte IT - Período Noviembre;145000.00;21;RI;Cuenta Corriente;20261101;20261130;20261110
+A;30708912340;Distribuidora del Centro S.R.L.;ventas@distribuidoracentro.com;San Martín 456, Rosario, Santa Fe;Abono Mensual de Mantenimiento Preventivo Noviembre;98000.00;10.5;RI;Contado;20261101;20261130;20261110
+B;20329876544;Lucas Gabriel Benítez;lucas.benitez@gmail.com;Belgrano 789, Córdoba;Servicio Técnico Especializado - Cuota Noviembre;52000.00;21;CF;Contado;20261101;20261130;20261110
+B;27255684774;María Laura Fernández;mfernandez@estudiojuridico.com.ar;Calle 50 Nro 620, La Plata;Honorarios Profesionales de Asesoría Noviembre;68000.00;21;MONO;Contado;20261101;20261130;20261110
+B;30546741253;Obra Social de Empleados;facturacion@obrasocial.org.ar;Leandro N. Alem 1050, CABA;Prestación Médica y Cuidados Asistenciales - Mes Noviembre;295000.00;EXENTO;EXENTO;Cuenta Corriente;20261101;20261130;20261110
+B;SIN_CUIT;Consumidor Final;;;Servicio de Asistencia y Cuidados Especiales Noviembre;25000.00;21;CF;Contado;20261101;20261130;20261110
